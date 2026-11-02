@@ -207,19 +207,19 @@ flowchart LR
     P([push / PR]) --> CI
     subgraph CI[GitHub Actions · ubuntu-24.04 limpo]
         direction LR
-        U[uv fixado<br/>instalador oficial] --> S[scripts/setup.sh<br/>Python + deps + modelo<br/>com SHA-256] --> K[scripts/check.sh]
+        U[uv fixado<br/>instalador oficial] --> S[scripts/setup.sh<br/>Python + deps + modelo<br/>com SHA-256 + pipeline] --> K[scripts/check.sh]
     end
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>~1 s, offline]
-        L3 --> L4[pytest -m integration<br/>sobe o Bonsai real]
+        L2 --> L3[pytest unitário<br/>136 testes, ~4 s, offline]
+        L3 --> L4[pytest -m integration<br/>3 testes, sobe o Bonsai real]
     end
     K -.-> K2
 ```
 
 ```bash
-./scripts/check.sh          # tudo: lock, lint, unitários e integração (~20 s com o modelo baixado)
+./scripts/check.sh          # tudo: lock, lint, unitários e integração (~25 s com o modelo baixado)
 FAST=1 ./scripts/check.sh   # sem integração
 uv run pytest -m integration -rs   # só a integração com o LLM local
 ```
@@ -227,12 +227,17 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Camada | O que garante | Arquivo |
 |---|---|---|
 | Qualidade de código | [ruff](https://docs.astral.sh/ruff/) com ~30 famílias de regras: correção (`F`, `B`, `PL`), **segurança** (`S`/bandit), exceções (`TRY`, `BLE`), pytest (`PT`), pathlib (`PTH`), datas com fuso (`DTZ`), estilo de docstring (`D`, Google) e formatação. Exceções justificadas uma a uma no `pyproject.toml` | `pyproject.toml` |
-| Versões fixadas | Python exato e gerenciado, `requires-python`, uv no setup e no README, `uv.lock` atualizado | `tests/test_infra.py` |
+| Versões fixadas | Python exato e gerenciado, `requires-python`, uv no setup e no README, `uv.lock` atualizado | `tests/test_infra.py` (27 testes nas 5 linhas de infraestrutura) |
 | Manifesto | URLs fixadas em tag/commit (nunca `main`/`latest`), SHA-256 válido, artefatos baixados íntegros | `tests/test_infra.py` |
 | Download | baixa, é idempotente, **recusa checksum errado** sem deixar lixo, não sobrescreve arquivo corrompido sem `FORCE=1` | `tests/test_infra.py` |
 | Scripts | sintaxe bash válida, executáveis, erro claro sem artefatos | `tests/test_infra.py` |
 | `.gitignore` | binários, `.env`, `_raw/` e gerados fora do git; manifesto, `.env.example` e dados brutos dentro | `tests/test_infra.py` |
-| LLM real | servidor sobe pelo script, contexto 8192, alias `bonsai`, responde chat e devolve **tool call estruturado** | `tests/test_llm_integration.py` |
+| Relatório de dados | cada número de `docs/data_report.md` continua verdadeiro sobre `data/raw` (11) | `tests/test_data_findings.py` |
+| Orquestrador | ordem topológica, ciclo/dependência inexistente rejeitados, execução incremental por conteúdo, invalidação por entrada/código/versão, saída adulterada detectada, falha isola dependentes, linhagem (19) | `tests/test_pipeline_core.py` |
+| Config, logs e CLI | defaults, sobrescrita por ambiente, **config inválida falha cedo**, logs texto/JSON, `emporio pipeline` e códigos de saída (12) | `tests/test_config_cli.py` |
+| Camada de dados | regras de tratamento, 7 tipos de linha inválida reportados com `arquivo:linha campo`, integridade referencial, **7 violações barradas pelos `CHECK`s do banco**, banco anterior intacto quando a validação falha, mudança de regra refaz o `transform` (41) | `tests/test_data_layer.py` |
+| Repository | **suíte de contrato** (22, reutilizável para o Postgres) + somente leitura, injeção de SQL, uma conexão por thread (4) | `tests/contract/`, `tests/test_sqlite_repository.py` |
+| LLM real | servidor sobe pelo script, contexto 8192, alias `bonsai`, responde chat e devolve **tool call estruturado** (3) | `tests/test_llm_integration.py` |
 
 ## Pipeline de dados
 
@@ -391,14 +396,14 @@ Relatório completo, com modelo ER, gráficos e uma decisão para cada achado:
 ```mermaid
 flowchart LR
     C1[1 · estrutura +<br/>setup]:::done --> C1b[1b · testes + CI]:::done --> C2[2 · relatório<br/>de dados]:::done --> C3[3 · pipeline +<br/>config + CLI]:::done
-    C3 --> C4[4 · dados<br/>SQLite]:::wip --> C5[5 · políticas] --> C6[6 · busca híbrida<br/>embeddings] --> C7[7-8 · domínio]
+    C3 --> C4[4 · dados<br/>SQLite]:::done --> C4b[4b · lint<br/>ampliado]:::done --> C5[5 · políticas]:::next --> C6[6 · busca híbrida<br/>embeddings] --> C7[7-8 · domínio]
     C7 --> C9[9 · servidor MCP] --> C10[10 · perfis LLM] --> C11[11 · agente] --> C12[12 · detecção<br/>de assunto] --> C13[13 · chat +<br/>histórico]
     C13 --> C14[14 · guardrails] --> C15[15 · eval] --> C16[16 · escala<br/>Postgres/pgvector] --> C17[17 · exemplos] --> CX[19-21 · Airflow,<br/>REST, UI] --> C18[README final]
-    classDef wip fill:#fde68a,stroke:#b45309,color:#000
+    classDef next fill:#fde68a,stroke:#b45309,color:#000
     classDef done fill:#bbf7d0,stroke:#15803d,color:#000
 ```
 
-Extras previstos: endpoint REST `/chat`, interface gráfica e template de DAG do Airflow.
+Verde: concluído. Amarelo: próximo. Extras previstos: endpoint REST `/chat`, interface gráfica e template de DAG do Airflow.
 
 ## Estrutura do repositório
 
@@ -442,4 +447,8 @@ Este projeto está sendo desenvolvido com o **Claude Code** como par de programa
   de dados. A discussão levou à arquitetura "leve por padrão, escala por configuração".
 - **Testes pegando erros reais:** os testes do orquestrador encontraram dois bugs no código gerado
   (fingerprint calculado antes de as dependências rodarem; saída sem extensão tratada como diretório),
-  corrigidos antes do commit.
+  corrigidos antes do commit. Ao desenhar a camada de dados apareceu uma falha de projeto (mudar uma regra
+  não invalidava a etapa que a usa), corrigida com a declaração de dependências de código por etapa.
+- **Padrões de qualidade definidos por mim:** pedi o lint ampliado (ruff com ~30 famílias, inclusive
+  segurança); cada exceção às regras está justificada. Cada commit é verificado isoladamente, não só o
+  último do push.
