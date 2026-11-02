@@ -1,0 +1,46 @@
+# --- Material original do desafio (enunciado + zip extraído) ---
+_raw/
+
+# --- Modelos locais (binários grandes: ~250 MB+) ---
+# Mantemos só o README com instruções de download/uso.
+models/**
+!models/
+!models/README.md
+!models/manifest.tsv
+
+# --- Dados gerados (reconstruídos por scripts/build_*.py) ---
+data/processed/*
+!data/processed/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Segredos / configuração local ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# --- Logs / runtime ---
+logs/
+*.log
+
+# --- Editores / SO ---
+.vscode/
+.idea/
+.DS_Store
+*.swp

@@ -1,0 +1,5 @@
+# Artefatos locais: fonte oficial fixada (tag/commit) + checksum SHA-256.
+# Usado por scripts/download_model.sh. Colunas separadas por TAB.
+# id	arquivo_destino	url	sha256
+llamafile-0.10.6	models/runtime/llamafile-0.10.6-thin	https://github.com/mozilla-ai/llamafile/releases/download/0.10.6/llamafile-0.10.6-thin	756bf97febae557084e8ced9bde7a1cb0c7f6ce778530d582afa219406237a50
+bonsai-1.7b	models/bonsai-1.7b/Bonsai-1.7B.gguf	https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/210a9e99f79cb184909d49595906526eb2b3dd9a/Bonsai-1.7B.gguf	3d7c6c90dd98717a203adb22d5eacd2581850e40aa5327e144b97766cae5f7e3

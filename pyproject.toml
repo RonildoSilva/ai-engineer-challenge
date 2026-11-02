@@ -1,0 +1,49 @@
+[project]
+name = "emporio"
+version = "0.1.0"
+description = "Agente de atendimento da Empório da Música (MCP + LLM local/online)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mcp[cli]>=1.9",
+    "openai>=1.60",
+    "pandas>=2.2",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "rapidfuzz>=3.9",
+    "pypdf>=4.2",
+    "rich>=13.7",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+]
+
+[tool.uv]
+# Desenvolvido com uv 0.12.21 (ver scripts/setup.sh). O uv.lock garante versões exatas.
+required-version = ">=0.12"
+# Sempre o CPython gerenciado pelo uv (versão exata de .python-version), nunca o do sistema.
+python-preference = "only-managed"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/emporio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
