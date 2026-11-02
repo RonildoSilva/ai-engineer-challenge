@@ -212,6 +212,8 @@ uv run emporio rules ship 349.90 --cidade "Campo Grande"
 uv run emporio rules hours                         # aberta/fechada agora (fuso de Campo Grande)
 uv run emporio mcp                                 # servidor MCP via stdio (para agentes e Claude Desktop)
 uv run emporio mcp --http --port 8000              # servidor MCP via Streamable HTTP em /mcp
+uv run emporio llm list                            # perfis de LLM (testados × referência)
+uv run emporio llm check [--profile bonsai]        # conexão, contexto, chat e tool calling
 ```
 
 > Chat, servidor MCP e avaliação serão documentados aqui conforme forem implementados.
@@ -232,8 +234,8 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>382 testes, ~20 s, offline]
-        L3 --> L4[pytest -m integration<br/>7 testes, sobe os modelos reais]
+        L2 --> L3[pytest unitário<br/>407 testes, ~25 s, offline]
+        L3 --> L4[pytest -m integration<br/>8 testes, sobe os modelos reais]
     end
     K -.-> K2
 ```
@@ -261,8 +263,9 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Catálogo | preço com promoção × PIX (§6.2), faixa de preço e categoria extraídas do texto, acessórios × "violão de 7 cordas", exemplo do enunciado ("violões até R$1000": 12 opções), preço promocional nos filtros, nome aproximado e pergunta inteira ("Quanto custa o Takamine GD20?"), ambiguidade, alternativas para esgotado/descontinuado/em breve, CLI (62) | `tests/test_catalog.py` |
 | Pedidos e regras | verificação por e-mail ou telefone **do titular** (com/sem DDD, +55) e mensagem neutra em qualquer falha, e-mail duplicado só abre o próprio pedido, pedido atrasado, prazos de arrependimento/defeito/preferência dentro e fora da janela, garantia legal, parcelamento pelas faixas da §3.1, frete metropolitano × outras cidades × frete especial, feriados (Páscoa calculada) e fuso de Campo Grande, CLI (70) | `tests/test_orders_rules.py` |
 | Servidor MCP | exatamente as 8 tools, todas somente leitura e com saída estruturada; nenhuma forma de listar clientes; respostas de cada tool (GD20, promoção sem PIX, alternativas, escopos, pedido verificado e não verificado, devolução, pagamento, frete, horário, políticas); erro esperado amigável, argumento inválido rejeitado, **erro inesperado sem detalhes internos**, **logs sem e-mail/telefone**; resources e prompt; transportes **stdio e HTTP** com subprocesso real (26) | `tests/test_mcp_server.py` |
+| Cliente LLM | perfis do projeto válidos (online marcados como referência), seleção e sobrescritas, **chave de API ausente com erro claro**, contexto lido de `/props` e fallback, temperatura e `max_tokens` do perfil, tools só se suportadas, **normalização de respostas de modelos pequenos** (JSON inválido nos argumentos, cercas de código, tool call escrita como texto, bloco `<think>`), servidor fora do ar e erro 5xx, CLI (25) | `tests/test_llm_client.py` |
 | Busca | documentos (descrição suja não entra), índice vetorial, **suíte de contrato do `Retriever`** (lexical e híbrido), fusão RRF, limiar de similaridade, **degradação para lexical** (serviço fora do ar, índice vazio, modelo trocado) e recuperação, cache de vetores, etapa sem modelo, CLI (44) | `tests/test_retrieval.py`, `tests/contract/` |
-| Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo"); **encerrar o `emporio mcp` (SIGTERM ou SIGHUP) encerra o servidor de embeddings** (7) | `tests/test_llm_integration.py` |
+| Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo"); **encerrar o `emporio mcp` (SIGTERM ou SIGHUP) encerra o servidor de embeddings**; **`LLMClient` com o Bonsai real** (contexto 8192 lido de `/props` e tool call) (8) | `tests/test_llm_integration.py` |
 
 ## Pipeline de dados
 
@@ -556,7 +559,7 @@ interfaces.
 | Embeddings | embeddinggemma-300m no runtime llamafile, em CPU, atrás de `Embedder` | API de embeddings ou GPU | ✅ |
 | API | servidor MCP via stdio ou Streamable HTTP (local, sem autenticação) | MCP HTTP atrás de API gateway com OAuth, réplicas | ✅ MCP · auth *(planejado)* |
 | Serviços locais | sobem sob demanda e encerram ao final (também com SIGTERM/SIGHUP); porta ocupada → porta livre; log em arquivo | serviços dedicados (systemd/containers) | ✅ |
-| LLM | Bonsai-1.7B em CPU | modelos maiores, GPU ou API | ✅ baseline |
+| LLM | perfil `bonsai` (local, CPU ou GPU) | outros perfis: modelos maiores, GPU ou API | ✅ perfis · online *(referência)* |
 
 ## Modelos locais
 
@@ -601,6 +604,28 @@ O mesmo runtime oficial serve os dois modelos. Detalhes, licenças e a política
   GPU, só a latência. Por isso o chat roda com `GPU=auto`: aproveita a GPU se existir e cai para CPU sem
   ela (como no CI). `GPU=disable` força CPU.
 
+### Perfis de LLM
+
+`config/llm_profiles.yaml` define os modelos que o agente pode usar. Todos falam a API compatível com
+OpenAI; trocar de modelo é mudar `LLM_PROFILE`, sem tocar no código.
+
+| Perfil | Modelo | Contexto | Status |
+|---|---|---|---|
+| `bonsai` (padrão) | Bonsai-1.7B local, llamafile | `auto` (lido de `/props`: 8192) | ✅ testado; sobe sozinho se estiver fora do ar |
+| `ollama-qwen2.5-3b` | Qwen2.5 3B via Ollama | 32768 | referência (Ollama não instalado aqui) |
+| `anthropic` | Claude Haiku (endpoint compatível com OpenAI) | 128000 | referência (precisa de `ANTHROPIC_API_KEY`) |
+| `openai` | `OPENAI_MODEL` | 128000 | referência (precisa de `OPENAI_API_KEY`) |
+
+- **Chaves nunca ficam no arquivo:** `api_key_env` aponta a variável de ambiente; sem ela, o erro diz qual
+  variável definir.
+- **Contexto por modelo:** `auto` lê o `n_ctx` do servidor (`/props`); o orçamento de contexto do agente
+  (próximos commits) usa esse número.
+- **Tolerância a modelos pequenos:** o cliente normaliza argumentos de tool com JSON inválido ou entre cercas
+  de código, recupera tool calls escritas como texto (`<tool_call>…</tool_call>`) e remove blocos `<think>`.
+  Um argumento inválido vira um erro devolvido ao modelo, em vez de quebrar a conversa.
+- `uv run emporio llm check` testa um perfil de ponta a ponta: no Bonsai, contexto 8192, chat em ~1,4 s e
+  `detalhar_produto({"produto": "Takamine GD20"})` em ~7,5 s (com a iGPU).
+
 ### Embeddings: embeddinggemma-300m
 
 Escolhido numa [avaliação com 4 candidatos](docs/embeddings_eval.md) (20 perguntas com gabarito sobre os 65
@@ -628,7 +653,7 @@ Detalhes e como adicionar modelos: [`models/README.md`](models/README.md).
 |---|---|---|
 | API de negócio | **Servidor MCP** (SDK oficial `mcp` 2.x, `MCPServer`) | Separa regras de negócio da orquestração; interoperável (Claude Desktop, Inspector, llamafile); primitivas certas (tools, resources, prompts). |
 | Abordagem | Function calling + **detecção de assunto com pré-busca** para todos os modelos | Dados exatos vêm de código testado; compensa a fraqueza de modelos pequenos em tool calling. |
-| LLM | Cliente compatível com OpenAI, **perfis** offline/online | Um caminho de código para llamafile, Ollama, APIs. Começamos por modelos pequenos (≤ 4B). |
+| LLM | Cliente compatível com OpenAI (SDK `openai` 3.x), **perfis** em YAML | Um caminho de código para llamafile, Ollama e APIs; contexto lido do servidor quando possível; respostas fora do padrão de modelos pequenos normalizadas no cliente. Começamos por modelos pequenos (≤ 4B). |
 | Baseline | Bonsai-1.7B via llamafile 0.10.6 | Gratuito, offline, ~250 MB; usa GPU se houver, CPU se não. |
 | Embeddings | **embeddinggemma-300m** no mesmo runtime, sempre em CPU | Venceu a [avaliação](docs/embeddings_eval.md) em acerto, latência e tamanho. Mesmo runtime do LLM, sem stack nova; bge-m3 (MIT) como alternativa se a licença Gemma for um impedimento. |
 | Políticas | **Curadoria versionada** do PDF, verificada pelo pipeline (cobertura, versão do PDF, fatos), publicada por seção | O manual tem ~3,2 mil tokens; vector DB seria desproporcional. A revisão humana resolve as contradições do PDF, e a verificação automática garante que ela não perde nem desatualiza nada. |
@@ -673,7 +698,7 @@ flowchart TD
     end
     subgraph F4["④ Agente"]
         direction LR
-        C10["10 · perfis<br/>de LLM"]:::next --> C11["11 · agente<br/>host MCP"] --> C12["12 · detecção<br/>de assunto"] --> C13["13 · chat +<br/>histórico"] --> C14["14 · guardrails"]
+        C10["10 · perfis<br/>de LLM"]:::done --> C11["11 · agente<br/>host MCP"]:::next --> C12["12 · detecção<br/>de assunto"] --> C13["13 · chat +<br/>histórico"] --> C14["14 · guardrails"]
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR
@@ -690,7 +715,7 @@ DAG do Airflow) entram antes do README final.
 ## Estrutura do repositório
 
 ```
-config/          perfis de LLM                                   (planejado)
+config/          perfis de LLM (llm_profiles.yaml)
 data/raw/        CSVs e manual de políticas originais
 data/curated/    curadoria do manual (uma seção .md por tema + _source.yaml) — versionada
 data/processed/  artefatos gerados (SQLite, policies.json, extração do PDF) — não versionado
@@ -706,7 +731,8 @@ src/emporio/     config.py (configuração validada), log.py (logs estruturados)
                  ports.py (interfaces), adapters/ (SQLite, embedders, índice vetorial, buscas),
                  retrieval/ (documentos, montagem da busca), services.py (servidores locais),
                  domain/ (modelos, busca de políticas, catálogo, pedidos, pagamento/frete, horário),
-                 mcp_server/ (servidor MCP, saídas estruturadas, persona); agente (planejado)
+                 mcp_server/ (servidor MCP, saídas estruturadas, persona),
+                 agent/ (cliente LLM com perfis; host MCP e loop: planejado)
 tests/contract/  suítes de contrato reutilizáveis por adaptador
 tests/           testes automatizados (unitários + integração com o LLM local)
 .github/         CI (GitHub Actions)
@@ -722,6 +748,8 @@ tests/           testes automatizados (unitários + integração com o LLM local
 - Indexar os 75 documentos em CPU leva ~1 minuto na primeira vez (depois, só o que muda é recalculado).
 - O valor do frete para outras cidades não é calculado (depende de CEP, peso, dimensões e APIs das
   transportadoras); o agente informa os prazos e que o valor sai no fechamento.
+- Os perfis online (Anthropic, OpenAI) e o do Ollama são configurações de referência: não foram executados
+  aqui (sem chaves de API e sem Ollama instalado). Só o `bonsai` está validado de ponta a ponta.
 - O servidor MCP via HTTP não tem autenticação: escuta só em `127.0.0.1` por padrão. Em produção, ficaria
   atrás de um gateway com OAuth (o SDK já oferece suporte).
 - A verificação de identidade aceita o telefone sem DDD (8+ dígitos finais): é prática para o cliente, mas
@@ -755,7 +783,9 @@ Este projeto está sendo desenvolvido com o **Claude Code** como par de programa
   suíte passou de 10 s para 118 s porque uma fixture de sessão subia o modelo real (corrigido para 12 s); e
   a porta 8081 desta máquina estava ocupada por outro serviço, o que levou à troca automática de porta.
 - **Não confiar na memória sobre APIs:** o lock instalou o SDK `mcp` 2.x, em que `FastMCP` virou `MCPServer`
-  e os campos passaram a snake_case. Antes de escrever o servidor, um protótipo validou cada recurso usado.
+  e os campos passaram a snake_case, e o `openai` 3.x, que usa `httpx2` em vez de `httpx`. Antes de escrever
+  cada camada, um protótipo validou os recursos usados; a dependência indireta usada diretamente (`httpx2`)
+  foi declarada no `pyproject.toml`.
 - **Lint e testes pegando bugs de produção no servidor MCP:** o campo `args` nos logs colidia com um
   atributo interno do `LogRecord` (quebraria na primeira chamada de tool); e encerrar o `emporio mcp` com
   SIGTERM ou fechando o terminal deixava o servidor de embeddings órfão. A correção tem teste de regressão,

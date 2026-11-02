@@ -283,3 +283,26 @@ def test_mcp_shutdown_stops_embedding_server(tmp_path, built_store, sig):
     finally:
         if proc.poll() is None:
             os.killpg(proc.pid, signal.SIGKILL)
+
+
+def test_llm_client_with_real_bonsai(server):
+    """LLMClient (perfil bonsai) contra o servidor real: contexto via /props e tool calling."""
+    from emporio.agent.llm import LLMClient, get_profile
+    from emporio.config import Settings
+
+    profile = get_profile(Settings(_env_file=None), "bonsai")  # type: ignore[call-arg]
+    client = LLMClient(profile.model_copy(update={"base_url": f"{server}/v1"}))
+    assert client.ping()
+    assert client.context_window() == 8192
+    r = client.chat(
+        [
+            {"role": "system", "content": "Atendente da Empório da Música. Use ferramentas."},
+            {"role": "user", "content": "Quanto custa o Takamine GD20?"},
+        ],
+        tools=[TOOL],
+        temperature=0,
+    )
+    assert r.tool_calls
+    assert r.tool_calls[0].name == "detalhar_produto"
+    assert r.tool_calls[0].error is None
+    assert r.latency_s > 0

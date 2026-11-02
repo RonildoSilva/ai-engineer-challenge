@@ -38,11 +38,15 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["text", "json"] = "text"
 
-    # --- LLM (perfis completos chegam no commit de perfis) ---------------------------
-    llm_base_url: str = "http://localhost:8080/v1"
-    llm_model: str = "bonsai"
-    llm_api_key: str = "none"
-    llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    # --- LLM ------------------------------------------------------------------------
+    # Perfil ativo em config/llm_profiles.yaml (None = o perfil `default` do arquivo).
+    llm_profile: str | None = None
+    llm_profiles_file: Path = Path("config/llm_profiles.yaml")
+    # Sobrescritas opcionais do perfil ativo (ex.: apontar o bonsai para outra porta).
+    llm_base_url: str | None = None
+    llm_model: str | None = None
+    llm_api_key: str | None = None
+    llm_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
 
     # --- embeddings e busca ----------------------------------------------------------
     # llamafile: servidor local (sobe sozinho se o modelo estiver baixado); fake: determinístico,

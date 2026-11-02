@@ -15,6 +15,8 @@ emporio rules pay 599.90 [--promo] [--parcelas 10]         formas de pagamento e
 emporio rules ship 349.90 --cidade "Campo Grande"          frete
 emporio rules hours [--at 2026-11-02T10:00]                loja aberta/fechada agora
 emporio mcp [--http] [--host 127.0.0.1] [--port 8000]      servidor MCP (stdio ou Streamable HTTP)
+emporio llm list                                           perfis de LLM configurados
+emporio llm check [--profile bonsai]                       conexão, contexto, chat e tool calling
 """
 
 from __future__ import annotations
@@ -27,6 +29,13 @@ from datetime import datetime
 from pydantic import ValidationError
 
 from emporio.adapters.sqlite_repo import SqliteRepository
+from emporio.agent.llm import (
+    LLMClient,
+    LLMConfigError,
+    LLMUnavailableError,
+    get_profile,
+    load_profiles,
+)
 from emporio.config import Settings
 from emporio.data import policies as pol
 from emporio.domain.calculators import check_installments, payment_plan, shipping_quote
@@ -92,6 +101,12 @@ def _parser() -> argparse.ArgumentParser:
     cshow = catalog.add_parser("show", help="detalhe de um produto (nome aproximado ou id)")
     cshow.add_argument("ref")
 
+    _add_service_commands(sub)
+    return p
+
+
+def _add_service_commands(sub: argparse._SubParsersAction) -> None:
+    """Comandos de pedidos, regras, MCP e LLM."""
     order = sub.add_parser("order", help="pedidos (exige e-mail ou telefone do titular)")
     order_sub = order.add_subparsers(dest="action", required=True)
     oshow = order_sub.add_parser("show", help="consulta um pedido")
@@ -119,7 +134,11 @@ def _parser() -> argparse.ArgumentParser:
     mcp.add_argument("--http", action="store_true", help="Streamable HTTP em /mcp")
     mcp.add_argument("--host", default="127.0.0.1")
     mcp.add_argument("--port", type=int, default=8000)
-    return p
+
+    llm = sub.add_parser("llm", help="perfis de LLM").add_subparsers(dest="action", required=True)
+    llm.add_parser("list", help="perfis configurados")
+    check = llm.add_parser("check", help="testa um perfil (sobe o servidor local se preciso)")
+    check.add_argument("--profile", help="nome do perfil (padrão: LLM_PROFILE ou o default)")
 
 
 def _pipeline_cmd(args: argparse.Namespace, settings: Settings) -> int:
@@ -306,6 +325,64 @@ def _exit_on_signal(signum: int, _frame: object) -> None:
     raise SystemExit(128 + signum)
 
 
+PROBE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "detalhar_produto",
+        "description": "Preço, promoção e disponibilidade de um modelo de instrumento.",
+        "parameters": {
+            "type": "object",
+            "properties": {"produto": {"type": "string"}},
+            "required": ["produto"],
+        },
+    },
+}
+
+
+def _llm_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    if args.action == "list":
+        data = load_profiles(settings.path(settings.llm_profiles_file))
+        active = settings.llm_profile or data.default
+        for name, p in data.profiles.items():
+            mark = "*" if name == active else " "
+            tested = "testado" if p.tested else "referência"
+            local = " [local]" if p.local else ""
+            print(f"{mark} {name:<20} {p.model:<18} ctx={p.context_window!s:<7} {tested}{local}")
+            print(f"    {p.description}")
+        return 0
+
+    profile = get_profile(settings, args.profile)
+
+    def run(url: str) -> int:
+        client = LLMClient(profile.model_copy(update={"base_url": url}))
+        print(f"perfil: {profile.name} · modelo: {profile.resolved_model()} · {url}")
+        print(f"contexto: {client.context_window()} tokens")
+        hello = client.chat([{"role": "user", "content": "Responda só: olá"}], max_tokens=16)
+        print(f"chat: {hello.content[:60]!r} em {hello.latency_s:.1f} s")
+        probe = client.chat(
+            [{"role": "system", "content": "Atendente de loja de instrumentos. Use ferramentas."},
+             {"role": "user", "content": "Quanto custa o Takamine GD20?"}],
+            tools=[PROBE_TOOL], temperature=0,
+        )  # fmt: skip
+        calls = [(c.name, c.arguments) for c in probe.tool_calls]
+        print(f"tool calling: {calls or 'nenhuma chamada'} em {probe.latency_s:.1f} s")
+        return 0 if calls else 1
+
+    try:
+        if profile.local and not LLMClient(profile).ping():
+            with ensure_server(
+                profile.local.mode,
+                profile.base_url,
+                settings.path(profile.local.model_file),
+                log_dir=settings.processed_dir / "logs",
+            ) as url:
+                return run(url)
+        return run(profile.base_url)
+    except (LLMUnavailableError, ServerUnavailableError) as e:
+        print(f"✘ {e}", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     for sig in (signal.SIGTERM, signal.SIGHUP):  # kill e terminal fechado
         signal.signal(sig, _exit_on_signal)
@@ -326,10 +403,11 @@ def main(argv: list[str] | None = None) -> int:
         "order": _order_cmd,
         "rules": _rules_cmd,
         "mcp": _mcp_cmd,
+        "llm": _llm_cmd,
     }
     try:
         return commands[args.command](args, settings)
-    except (PipelineError, pol.PolicyError, FileNotFoundError) as e:
+    except (PipelineError, pol.PolicyError, LLMConfigError, FileNotFoundError) as e:
         print(f"✘ {e}", file=sys.stderr)
         return 2
 

@@ -1,0 +1,67 @@
+# Perfis de LLM. O ativo é escolhido por LLM_PROFILE (padrão: o `default` abaixo).
+#
+# Todos usam a API compatível com OpenAI (/v1/chat/completions); só muda endpoint, modelo e limites.
+# Chaves de API nunca ficam aqui: `api_key_env` aponta a variável de ambiente que as contém.
+#
+# Campos:
+#   context_window      "auto" lê o n_ctx de /props (llama.cpp/llamafile); número = teto fixo
+#   max_output_tokens   reserva para a resposta no orçamento de contexto
+#   supports_tools      o modelo/servidor entende `tools` e devolve `tool_calls`
+#   local               servidor local que o projeto pode subir sozinho (scripts/start_llamafile.sh)
+#   tested              true = executado e validado neste projeto; false = configuração de referência
+
+default: bonsai
+
+profiles:
+  bonsai:
+    description: Bonsai-1.7B local via llamafile (baseline offline, CPU ou GPU)
+    base_url: http://127.0.0.1:8080/v1
+    model: bonsai
+    api_key: none
+    context_window: auto
+    fallback_context_window: 8192
+    max_output_tokens: 512
+    temperature: 0.2
+    supports_tools: true
+    timeout_s: 180          # CPU pura chega a ~18 s por chamada; margem para respostas longas
+    local:
+      mode: chat
+      model_file: models/bonsai-1.7b/Bonsai-1.7B.gguf
+    tested: true
+
+  ollama-qwen2.5-3b:
+    description: Qwen2.5 3B via Ollama (candidato ≤ 4B; requer Ollama instalado)
+    base_url: http://127.0.0.1:11434/v1
+    model: qwen2.5:3b
+    api_key: none
+    context_window: 32768
+    max_output_tokens: 512
+    temperature: 0.2
+    supports_tools: true
+    timeout_s: 120
+    tested: false
+
+  anthropic:
+    description: Claude Haiku via endpoint compatível com OpenAI (referência online)
+    base_url: https://api.anthropic.com/v1/
+    model: claude-haiku-5-5
+    api_key_env: ANTHROPIC_API_KEY
+    context_window: 128000  # teto usado pelo orçamento de contexto (o modelo aceita mais)
+    max_output_tokens: 1024
+    temperature: 0.2
+    supports_tools: true
+    timeout_s: 60
+    tested: false
+
+  openai:
+    description: OpenAI (referência online; modelo definido por OPENAI_MODEL)
+    base_url: https://api.openai.com/v1
+    model: gpt-4o-mini
+    model_env: OPENAI_MODEL
+    api_key_env: OPENAI_API_KEY
+    context_window: 128000
+    max_output_tokens: 1024
+    temperature: 0.2
+    supports_tools: true
+    timeout_s: 60
+    tested: false
