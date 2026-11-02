@@ -24,9 +24,10 @@ case "$MODE" in
     ALIAS="${ALIAS:-bonsai}"
     PORT="${PORT:-8080}"
     CTX="${CTX:-8192}"      # prompt + tools + histórico curto
-    # GPU=auto: usa a GPU se existir e cai para CPU sem ela (como no CI). O acerto não muda,
-    # só a latência (~5 s com a iGPU desta máquina, ~18 s em CPU). GPU=disable força CPU.
-    GPU="${GPU:-auto}"
+    # CPU por padrão. Na iGPU Intel (Vulkan) desta máquina, prompts acima de algumas centenas de
+    # tokens saíam corrompidos ("texto texto texto…"): erro de cálculo, não só de desempenho.
+    # GPU=auto usa a GPU se existir; só use depois de validar a saída na sua placa.
+    GPU="${GPU:-disable}"
     REASONING="${REASONING:-off}"
     # --jinja: template de chat do modelo (necessário para tool_calls estruturados)
     # --reasoning: A/B no Bonsai: mesmo acerto de tool calling, off é ~20% mais rápido

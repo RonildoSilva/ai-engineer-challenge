@@ -48,10 +48,11 @@ Intel UHD 620 e NVIDIA MX150.
 
 | Modo | Padrão | Motivo |
 |---|---|---|
-| `chat` | `GPU=auto` | Usa a GPU se existir (~5 s por chamada nesta máquina, ~18 s em CPU) e cai para CPU sem ela, como no CI. O acerto não muda, só a latência. |
+| `chat` | `GPU=disable` (CPU) | Na iGPU (Vulkan) desta máquina, prompts curtos saíam certos (~5 s contra ~18 s em CPU), mas o prompt real do agente (~2 mil tokens) saía **corrompido** ("texto texto texto…"). Erro de cálculo, não de desempenho. |
 | `embedding` | `GPU=disable` (CPU) | Lotes grandes de embeddings derrubaram o driver Vulkan da iGPU (`vk::DeviceLostError`). Em CPU, uma consulta leva ~60 ms e o servidor usa ~185 MB de RAM. |
 
-Ambos aceitam `GPU=disable|auto|nvidia|amd|apple`.
+Ambos aceitam `GPU=disable|auto|nvidia|amd|apple`. Use GPU só depois de validar a saída na sua placa com um
+prompt longo (por exemplo, `uv run emporio ask "Quanto custa o Takamine GD20?" --debug`).
 
 ## Adicionando outros modelos
 
@@ -59,4 +60,4 @@ Ambos aceitam `GPU=disable|auto|nvidia|amd|apple`.
   download no `setup.sh` e suba com
   `MODEL=models/<id>/<arquivo>.gguf ALIAS=<id> [MODE=embedding] ./scripts/start_llamafile.sh`.
 - **Outros servidores/APIs** compatíveis com OpenAI (Ollama, llama.cpp, LM Studio, APIs online): perfil em
-  `config/llm_profiles.yaml` (planejado).
+  `config/llm_profiles.yaml` (ver `uv run emporio llm list`).

@@ -83,8 +83,8 @@ trocar o modelo, pois o código não depende dele.
 
 - **GPU automática:** o llamafile usa a GPU quando encontra uma. Na máquina de desenvolvimento (Intel UHD 620
   via Vulkan), lotes grandes de embeddings do Qwen3 derrubaram o driver (`vk::DeviceLostError`). Por isso o
-  modo `embedding` do `start_llamafile.sh` roda **sempre em CPU**. O LLM de chat usa `GPU=auto`: aproveita a
-  GPU se existir (~5 s por chamada nesta máquina, contra ~18 s em CPU) e cai para CPU sem ela, como no CI.
+  modo `embedding` do `start_llamafile.sh` roda **sempre em CPU**. O chat também voltou a usar CPU por padrão
+  depois que a mesma iGPU passou a corromper os prompts longos do agente (ver README, "Modelos locais").
 - **Binário APE:** o llamafile é um *Actually Portable Executable*. O `subprocess` do Python não consegue
   executá-lo diretamente (`Exec format error`); por isso os processos são iniciados pelo
   `start_llamafile.sh` (o bash o executa via `sh`).

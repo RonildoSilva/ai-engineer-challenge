@@ -17,11 +17,14 @@ emporio rules hours [--at 2026-11-02T10:00]                loja aberta/fechada a
 emporio mcp [--http] [--host 127.0.0.1] [--port 8000]      servidor MCP (stdio ou Streamable HTTP)
 emporio llm list                                           perfis de LLM configurados
 emporio llm check [--profile bonsai]                       conexão, contexto, chat e tool calling
+emporio ask "Quanto custa o Takamine GD20?" [--debug]      uma pergunta ao agente, de ponta a ponta
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
 import signal
 import sys
 from datetime import datetime
@@ -29,6 +32,7 @@ from datetime import datetime
 from pydantic import ValidationError
 
 from emporio.adapters.sqlite_repo import SqliteRepository
+from emporio.agent.agent import Agent
 from emporio.agent.llm import (
     LLMClient,
     LLMConfigError,
@@ -36,6 +40,7 @@ from emporio.agent.llm import (
     get_profile,
     load_profiles,
 )
+from emporio.agent.mcp_client import McpToolbox
 from emporio.config import Settings
 from emporio.data import policies as pol
 from emporio.domain.calculators import check_installments, payment_plan, shipping_quote
@@ -139,6 +144,11 @@ def _add_service_commands(sub: argparse._SubParsersAction) -> None:
     llm.add_parser("list", help="perfis configurados")
     check = llm.add_parser("check", help="testa um perfil (sobe o servidor local se preciso)")
     check.add_argument("--profile", help="nome do perfil (padrão: LLM_PROFILE ou o default)")
+
+    ask = sub.add_parser("ask", help="uma pergunta ao agente (sobe os servidores necessários)")
+    ask.add_argument("question")
+    ask.add_argument("--profile", help="perfil de LLM (padrão: LLM_PROFILE ou o default)")
+    ask.add_argument("--debug", action="store_true", help="mostra as tools chamadas")
 
 
 def _pipeline_cmd(args: argparse.Namespace, settings: Settings) -> int:
@@ -383,6 +393,49 @@ def _llm_cmd(args: argparse.Namespace, settings: Settings) -> int:
         return 1
 
 
+def _ask_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    profile = get_profile(settings, args.profile)
+
+    def run(embedding_url: str | None) -> int:
+        with contextlib.ExitStack() as stack:
+            llm_url = profile.base_url
+            if profile.local and not LLMClient(profile).ping():
+                llm_url = stack.enter_context(
+                    ensure_server(
+                        profile.local.mode,
+                        profile.base_url,
+                        settings.path(profile.local.model_file),
+                        log_dir=settings.processed_dir / "logs",
+                    )
+                )
+            llm = LLMClient(profile.model_copy(update={"base_url": llm_url}))
+            server = build_server(settings, embedding_url=embedding_url)
+
+            async def go():
+                async with McpToolbox(server) as toolbox:
+                    agent = Agent(llm, toolbox, reference_date=settings.reference_date)
+                    return await agent.respond(args.question)
+
+            turn = asyncio.run(go())
+        print(turn.answer)
+        if args.debug:
+            print(
+                f"\n— {turn.llm_calls} chamada(s) ao LLM em {turn.latency_s:.1f} s", file=sys.stderr
+            )
+            for t in turn.tools:
+                status = "ok" if t.ok else "erro"
+                print(f"  · {t.name}({t.arguments}) [{status}] {t.output[:160]}", file=sys.stderr)
+            if turn.fallback:
+                print(f"  · resposta de segurança: {turn.fallback}", file=sys.stderr)
+        return 0 if not turn.fallback else 1
+
+    try:
+        return _with_embeddings(settings, run)
+    except ServerUnavailableError as e:
+        print(f"✘ {e}", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     for sig in (signal.SIGTERM, signal.SIGHUP):  # kill e terminal fechado
         signal.signal(sig, _exit_on_signal)
@@ -404,6 +457,7 @@ def main(argv: list[str] | None = None) -> int:
         "rules": _rules_cmd,
         "mcp": _mcp_cmd,
         "llm": _llm_cmd,
+        "ask": _ask_cmd,
     }
     try:
         return commands[args.command](args, settings)

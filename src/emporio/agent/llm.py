@@ -142,6 +142,7 @@ class ChatResult:
 
 
 _THINK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+_BARE_JSON = re.compile(r"^\s*(?:```(?:json)?\s*)?(\{.*\})\s*(?:```)?\s*$", re.DOTALL)
 _TEXT_TOOL_CALL = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
 
 
@@ -173,6 +174,25 @@ def _tool_calls_from_text(content: str) -> tuple[str, list[ToolCall]]:
             args, error = _parse_arguments(args)
         calls.append(ToolCall(f"text-{i}", name, args, m.group(1), error))
     return _TEXT_TOOL_CALL.sub("", content).strip(), calls
+
+
+def _bare_json_tool_call(content: str) -> ToolCall | None:
+    """Resposta que é só `{"name": …, "arguments": …}`: uma tool call escrita como texto.
+
+    Visto no Bonsai com 8 tools no prompt: a intenção estava certa, mas sem as tags.
+    """
+    m = _BARE_JSON.match(content)
+    if not m:
+        return None
+    payload, error = _parse_arguments(m.group(1))
+    if error or not isinstance(payload.get("name"), str):
+        return None
+    args = payload.get("arguments", payload.get("parameters", {}))
+    if isinstance(args, str):
+        args, error = _parse_arguments(args)
+    if not isinstance(args, dict):
+        args, error = {}, "argumentos devem ser um objeto JSON"
+    return ToolCall("text-0", payload["name"], args, m.group(1), error)
 
 
 # ------------------------------------------------------------------------------ cliente
@@ -252,6 +272,8 @@ class LLMClient:
         content = _THINK.sub("", msg.content or "").strip()
         if not calls and "<tool_call>" in content:
             content, calls = _tool_calls_from_text(content)
+        if not calls and tools and (bare := _bare_json_tool_call(content)):
+            content, calls = "", [bare]
         usage = resp.usage.model_dump() if resp.usage else {}
         log.info(
             "chamada ao LLM",

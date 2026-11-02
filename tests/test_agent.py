@@ -1,0 +1,214 @@
+"""Agente: persona, loop de function calling via MCP e proteções (com LLM roteirizado)."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from datetime import date
+from typing import Any
+
+import pytest
+
+from emporio.agent.agent import FALLBACK_ANSWER, Agent
+from emporio.agent.llm import ChatResult, LLMUnavailableError, ToolCall, _bare_json_tool_call
+from emporio.agent.mcp_client import McpToolbox, compact
+from emporio.mcp_server.server import build_server
+from tests.conftest import make_settings
+
+REF = date(2026, 3, 25)
+
+
+@dataclass
+class ScriptedLLM:
+    """Devolve respostas pré-definidas, em ordem, e registra o que recebeu."""
+
+    script: list[ChatResult | Exception]
+    seen: list[list[dict[str, Any]]] = field(default_factory=list)
+    tools_seen: list[list[dict[str, Any]] | None] = field(default_factory=list)
+
+    def chat(self, messages, *, tools=None):
+        self.seen.append(json.loads(json.dumps(messages)))
+        self.tools_seen.append(tools)
+        step = self.script.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return step
+
+
+def answer(text: str) -> ChatResult:
+    return ChatResult(text, [], "stop")
+
+
+def tool(name: str, raw: str = "{}", error: str | None = None, call_id: str = "c1") -> ChatResult:
+    args = {} if error else json.loads(raw)
+    return ChatResult("", [ToolCall(call_id, name, args, raw, error)], "tool_calls")
+
+
+@pytest.fixture
+def server(built_store):
+    return build_server(make_settings(data_processed_dir=built_store.parent))
+
+
+async def run(server, llm: ScriptedLLM, *questions: str, max_rounds: int = 5):
+    async with McpToolbox(server) as toolbox:
+        agent = Agent(llm, toolbox, reference_date=REF, max_rounds=max_rounds)
+        return [await agent.respond(q) for q in questions], agent
+
+
+# ============================================================================ prompt e tools
+
+
+async def test_system_prompt_has_persona_and_context(server):
+    llm = ScriptedLLM([answer("Oi! Sou a Mel.")])
+    (turn,), _ = await run(server, llm, "oi")
+    system = llm.seen[0][0]
+    assert system["role"] == "system"
+    assert "Mel" in system["content"]
+    assert "25/03/2026" in system["content"]  # data de referência
+    assert "loja está" in system["content"]  # status da loja (tool status_loja)
+    assert turn.answer == "Oi! Sou a Mel."
+    assert turn.tools == []
+
+
+async def test_all_mcp_tools_are_offered_in_openai_format(server):
+    llm = ScriptedLLM([answer("ok")])
+    await run(server, llm, "oi")
+    tools = llm.tools_seen[0] or []
+    assert {t["function"]["name"] for t in tools} >= {"detalhar_produto", "consultar_pedido"}
+    detalhar = next(t for t in tools if t["function"]["name"] == "detalhar_produto")
+    assert detalhar["type"] == "function"
+    assert detalhar["function"]["parameters"]["required"] == ["produto"]
+
+
+# ============================================================================ loop
+
+
+async def test_tool_call_then_answer(server):
+    llm = ScriptedLLM([tool("detalhar_produto", '{"produto": "Takamine GD20"}'),
+                       answer("O GD20 custa R$ 2.199,00.")])  # fmt: skip
+    (turn,), _ = await run(server, llm, "Quanto custa o Takamine GD20?")
+    assert turn.answer == "O GD20 custa R$ 2.199,00."
+    assert turn.llm_calls == 2
+    assert [t.name for t in turn.tools] == ["detalhar_produto"]
+    assert turn.tools[0].ok
+    # o resultado da tool voltou ao modelo como mensagem `tool`, compacto e estruturado
+    tool_msg = llm.seen[1][-1]
+    assert tool_msg["role"] == "tool"
+    assert tool_msg["tool_call_id"] == "c1"
+    data = json.loads(tool_msg["content"])
+    assert data["produto"]["preco_final"] == 2199
+    assert "candidatos" not in data  # listas vazias removidas (menos tokens)
+    assert llm.seen[1][-2]["tool_calls"][0]["function"]["name"] == "detalhar_produto"
+
+
+async def test_history_keeps_only_user_and_answers(server):
+    llm = ScriptedLLM([tool("status_loja"), answer("Fechada hoje."), answer("De nada!")])
+    turns, agent = await run(server, llm, "a loja abre hoje?", "obrigado")
+    assert [t.answer for t in turns] == ["Fechada hoje.", "De nada!"]
+    roles = [m["role"] for m in agent.messages]
+    assert roles == ["system", "user", "assistant", "user", "assistant"]
+    assert [m["role"] for m in llm.seen[2]][-1] == "user"  # 2º turno sem as mensagens de tool
+
+
+async def test_invalid_arguments_are_returned_to_the_model(server):
+    llm = ScriptedLLM([tool("detalhar_produto", '{"produto": ', error="JSON truncado"),
+                       answer("Pode repetir o modelo?")])  # fmt: skip
+    (turn,), _ = await run(server, llm, "quanto custa?")
+    assert not turn.tools[0].ok
+    assert "Argumentos inválidos" in llm.seen[1][-1]["content"]
+    assert turn.answer == "Pode repetir o modelo?"
+
+
+async def test_unknown_tool_lists_available_ones(server):
+    llm = ScriptedLLM([tool("apagar_tudo"), answer("ok")])
+    (turn,), _ = await run(server, llm, "x")
+    assert "não existe" in llm.seen[1][-1]["content"]
+    assert "detalhar_produto" in llm.seen[1][-1]["content"]
+    assert not turn.tools[0].ok
+
+
+@pytest.mark.parametrize("garbled", ["detalhar_produtoArguments", "detalhar_produtos"])
+async def test_almost_right_tool_name_is_corrected(server, garbled):
+    """O Bonsai, com 8 tools no prompt, escreveu 'detalhar_produtoArguments'."""
+    llm = ScriptedLLM([tool(garbled, '{"produto": "95"}'), answer("ok")])
+    (turn,), _ = await run(server, llm, "x")
+    assert turn.tools[0].name == "detalhar_produto"
+    assert turn.tools[0].ok
+
+
+async def test_tool_error_is_returned_to_the_model(server):
+    llm = ScriptedLLM([tool("simular_pagamento", '{"valor": 0}'), answer("Qual o valor?")])
+    (turn,), _ = await run(server, llm, "parcela?")
+    assert not turn.tools[0].ok
+    assert "valor positivo" in llm.seen[1][-1]["content"]
+
+
+async def test_pii_masked_in_trace(server):
+    args = '{"numero_pedido": "8", "email_ou_telefone": "(67) 99654-7821"}'
+    llm = ScriptedLLM([tool("consultar_pedido", args), answer("Seu pedido está atrasado.")])
+    (turn,), _ = await run(server, llm, "cadê meu pedido?")
+    assert turn.tools[0].arguments["email_ou_telefone"] == "***"
+    assert turn.tools[0].ok  # mas a tool recebeu o valor real
+
+
+# ============================================================================ proteções
+
+
+async def test_round_limit_gives_safe_answer(server):
+    llm = ScriptedLLM([tool("status_loja", call_id=f"c{i}") for i in range(3)])
+    (turn,), _ = await run(server, llm, "x", max_rounds=3)
+    assert turn.answer == FALLBACK_ANSWER
+    assert "limite" in (turn.fallback or "")
+    assert turn.llm_calls == 3
+
+
+async def test_llm_unavailable_gives_safe_answer(server):
+    llm = ScriptedLLM([LLMUnavailableError("conexão recusada")])
+    (turn,), _ = await run(server, llm, "oi")
+    assert turn.answer == FALLBACK_ANSWER
+    assert "indisponível" in (turn.fallback or "")
+    assert "24 horas úteis" in turn.answer
+
+
+async def test_empty_answer_gives_safe_answer(server):
+    (turn,), _ = await run(server, ScriptedLLM([answer("   ")]), "oi")
+    assert turn.answer == FALLBACK_ANSWER
+    assert "vazia" in (turn.fallback or "")
+
+
+# ============================================================================ normalização
+
+
+def test_bare_json_tool_call_is_recovered():
+    call = _bare_json_tool_call(
+        '{"name": "detalhar_produtoArguments", "arguments": {"produto": "GD20"}}'
+    )
+    assert call is not None
+    assert call.name == "detalhar_produtoArguments"
+    assert call.arguments == {"produto": "GD20"}
+    assert _bare_json_tool_call("O preço é R$ 2.199,00.") is None
+    assert _bare_json_tool_call('{"preco": 2199}') is None  # JSON sem "name" não é tool call
+
+
+def test_compact():
+    assert compact({"a": None, "b": [], "c": {}, "d": "", "e": 0, "f": [{"g": None, "h": 1}]}) == {
+        "e": 0,
+        "f": [{"h": 1}],
+    }
+
+
+# ============================================================================ stdio
+
+
+async def test_agent_over_stdio_mcp(built_store):
+    import os
+    import sys
+    from pathlib import Path
+
+    env = {**os.environ, "DATA_PROCESSED_DIR": str(built_store.parent), "EMBEDDING_BACKEND": "fake"}
+    toolbox = McpToolbox.stdio(str(Path(sys.executable).parent / "emporio"), ["mcp"], env)
+    llm = ScriptedLLM([tool("detalhar_produto", '{"produto": "95"}'), answer("R$ 2.199,00")])
+    async with toolbox:
+        turn = await Agent(llm, toolbox, reference_date=REF).respond("GD20?")
+    assert turn.tools[0].ok
+    assert json.loads(llm.seen[1][-1]["content"])["produto"]["id"] == 95

@@ -306,3 +306,31 @@ def test_llm_client_with_real_bonsai(server):
     assert r.tool_calls[0].name == "detalhar_produto"
     assert r.tool_calls[0].error is None
     assert r.latency_s > 0
+
+
+async def test_agent_end_to_end_with_real_bonsai(server, built_store):
+    """Pergunta do enunciado, de ponta a ponta: Bonsai real → tool MCP → resposta com o preço.
+
+    Lento em CPU (~3-4 min): o prompt com as 8 tools tem ~2 mil tokens. A detecção de assunto
+    (próximo commit) reduz isso.
+    """
+    from datetime import date
+
+    from emporio.agent.agent import Agent
+    from emporio.agent.llm import LLMClient, get_profile
+    from emporio.agent.mcp_client import McpToolbox
+    from emporio.config import Settings
+    from emporio.mcp_server.server import build_server
+
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None, data_processed_dir=built_store.parent, embedding_backend="fake"
+    )
+    llm = LLMClient(get_profile(settings, "bonsai").model_copy(update={"base_url": f"{server}/v1"}))
+    async with McpToolbox(build_server(settings)) as toolbox:
+        turn = await Agent(llm, toolbox, reference_date=date(2026, 3, 25)).respond(
+            "Quanto custa o Takamine GD20?"
+        )
+    assert "detalhar_produto" in [t.name for t in turn.tools]
+    assert turn.fallback is None
+    digits = turn.answer.replace(".", "").replace(" ", "")
+    assert "2199" in digits

@@ -23,6 +23,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 - [Catálogo](#catálogo)
 - [Pedidos e regras da loja](#pedidos-e-regras-da-loja)
 - [Servidor MCP (a API)](#servidor-mcp-a-api)
+- [Agente](#agente)
 - [Camada de dados](#camada-de-dados)
 - [Escalabilidade e robustez](#escalabilidade-e-robustez)
 - [Modelos locais](#modelos-locais)
@@ -214,6 +215,7 @@ uv run emporio mcp                                 # servidor MCP via stdio (par
 uv run emporio mcp --http --port 8000              # servidor MCP via Streamable HTTP em /mcp
 uv run emporio llm list                            # perfis de LLM (testados × referência)
 uv run emporio llm check [--profile bonsai]        # conexão, contexto, chat e tool calling
+uv run emporio ask "Quanto custa o Takamine GD20?" --debug   # o agente, de ponta a ponta
 ```
 
 > Chat, servidor MCP e avaliação serão documentados aqui conforme forem implementados.
@@ -234,14 +236,14 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>407 testes, ~25 s, offline]
-        L3 --> L4[pytest -m integration<br/>8 testes, sobe os modelos reais]
+        L2 --> L3[pytest unitário<br/>423 testes, ~25 s, offline]
+        L3 --> L4[pytest -m integration<br/>9 testes, ~5 min,<br/>sobe os modelos reais]
     end
     K -.-> K2
 ```
 
 ```bash
-./scripts/check.sh          # tudo: lock, lint, unitários e integração (~1,5 min com os modelos baixados)
+./scripts/check.sh          # tudo: lock, lint, unitários e integração (~6 min com os modelos baixados; o teste de ponta a ponta do agente leva ~4)
 FAST=1 ./scripts/check.sh   # sem integração
 uv run pytest -m integration -rs   # só a integração com o LLM local
 ```
@@ -264,8 +266,9 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Pedidos e regras | verificação por e-mail ou telefone **do titular** (com/sem DDD, +55) e mensagem neutra em qualquer falha, e-mail duplicado só abre o próprio pedido, pedido atrasado, prazos de arrependimento/defeito/preferência dentro e fora da janela, garantia legal, parcelamento pelas faixas da §3.1, frete metropolitano × outras cidades × frete especial, feriados (Páscoa calculada) e fuso de Campo Grande, CLI (70) | `tests/test_orders_rules.py` |
 | Servidor MCP | exatamente as 8 tools, todas somente leitura e com saída estruturada; nenhuma forma de listar clientes; respostas de cada tool (GD20, promoção sem PIX, alternativas, escopos, pedido verificado e não verificado, devolução, pagamento, frete, horário, políticas); erro esperado amigável, argumento inválido rejeitado, **erro inesperado sem detalhes internos**, **logs sem e-mail/telefone**; resources e prompt; transportes **stdio e HTTP** com subprocesso real (26) | `tests/test_mcp_server.py` |
 | Cliente LLM | perfis do projeto válidos (online marcados como referência), seleção e sobrescritas, **chave de API ausente com erro claro**, contexto lido de `/props` e fallback, temperatura e `max_tokens` do perfil, tools só se suportadas, **normalização de respostas de modelos pequenos** (JSON inválido nos argumentos, cercas de código, tool call escrita como texto, bloco `<think>`), servidor fora do ar e erro 5xx, CLI (25) | `tests/test_llm_client.py` |
+| Agente | persona e contexto (data de referência, loja aberta) no system prompt, tools do MCP no formato do LLM, loop tool → resultado → resposta, histórico só com perguntas e respostas, argumento inválido / tool inexistente / erro da tool devolvidos ao modelo, **nome de tool quase certo corrigido**, **resposta de segurança** (limite de rodadas, LLM fora do ar, resposta vazia), PII mascarada no rastro, agente via stdio (16) | `tests/test_agent.py` |
 | Busca | documentos (descrição suja não entra), índice vetorial, **suíte de contrato do `Retriever`** (lexical e híbrido), fusão RRF, limiar de similaridade, **degradação para lexical** (serviço fora do ar, índice vazio, modelo trocado) e recuperação, cache de vetores, etapa sem modelo, CLI (44) | `tests/test_retrieval.py`, `tests/contract/` |
-| Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo"); **encerrar o `emporio mcp` (SIGTERM ou SIGHUP) encerra o servidor de embeddings**; **`LLMClient` com o Bonsai real** (contexto 8192 lido de `/props` e tool call) (8) | `tests/test_llm_integration.py` |
+| Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo"); **encerrar o `emporio mcp` (SIGTERM ou SIGHUP) encerra o servidor de embeddings**; **`LLMClient` com o Bonsai real** (contexto 8192 lido de `/props` e tool call); **agente de ponta a ponta**: "Quanto custa o Takamine GD20?" → `detalhar_produto` via MCP → resposta com R$ 2.199 (9) | `tests/test_llm_integration.py` |
 
 ## Pipeline de dados
 
@@ -516,6 +519,48 @@ Para usar no Claude Desktop ou no Claude Code, aponte para o comando (stdio):
 }
 ```
 
+## Agente
+
+`src/emporio/agent/` conecta o LLM ao servidor MCP. O agente só conhece a loja pelo protocolo MCP (em
+processo ou via stdio): lista as tools, usa o prompt `persona_atendente` e chama as ferramentas.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Cliente
+    participant A as Agente
+    participant L as LLM (perfil)
+    participant M as Servidor MCP
+    A->>M: persona_atendente + status_loja (início da conversa)
+    C->>A: "Quanto custa o Takamine GD20?"
+    A->>L: persona + contexto + histórico + 8 tools
+    L-->>A: tool call detalhar_produto({"produto": "Takamine GD20"})
+    A->>M: call_tool
+    M-->>A: {"preco_final": 2199, "preco_pix": 2089.05, "resumo_preco": "…"}
+    A->>L: resultado da tool
+    L-->>A: resposta final
+    A-->>C: "O Takamine GD20 custa R$ 2.199,00 (R$ 2.089,05 no PIX)…"
+```
+
+**Proteções do loop:**
+- argumento com JSON inválido, tool inexistente ou erro da tool viram mensagem para o modelo corrigir;
+- nome de tool quase certo é corrigido (o Bonsai escreveu `detalhar_produtoArguments`);
+- tool call escrita como JSON solto no texto é recuperada pelo cliente LLM;
+- **resposta de segurança** se o LLM cair, se passar de 5 rodadas ou se a resposta vier vazia: encaminha à
+  equipe, com retorno em até 24 horas úteis (manual §7.3);
+- o rastro de cada turno (tools, argumentos com e-mail/telefone mascarados, latência) aparece com `--debug`.
+
+**Resultado com o Bonsai real em CPU** (a pergunta do enunciado): o modelo chamou `detalhar_produto`, e a
+resposta trouxe os valores certos (R$ 2.199,00 e R$ 2.089,05 no PIX). Mas também mostrou os limites que o
+próximo commit ataca:
+- **latência de ~3 a 4 minutos**, porque o prompt com as 8 tools tem ~2 mil tokens;
+- **erro de redação**: o modelo chamou o preço de "promocional", sem haver promoção (os números vieram da
+  tool; o rótulo, do modelo);
+- antes de voltar para CPU, a iGPU devolvia lixo com esse mesmo prompt (ver "Modelos locais").
+
+A detecção de assunto com pré-busca (próximo commit) manda só as tools da intenção e já injeta os dados
+certos, reduzindo o prompt e o espaço para esses erros.
+
 ## Camada de dados
 
 ```mermaid
@@ -559,7 +604,7 @@ interfaces.
 | Embeddings | embeddinggemma-300m no runtime llamafile, em CPU, atrás de `Embedder` | API de embeddings ou GPU | ✅ |
 | API | servidor MCP via stdio ou Streamable HTTP (local, sem autenticação) | MCP HTTP atrás de API gateway com OAuth, réplicas | ✅ MCP · auth *(planejado)* |
 | Serviços locais | sobem sob demanda e encerram ao final (também com SIGTERM/SIGHUP); porta ocupada → porta livre; log em arquivo | serviços dedicados (systemd/containers) | ✅ |
-| LLM | perfil `bonsai` (local, CPU ou GPU) | outros perfis: modelos maiores, GPU ou API | ✅ perfis · online *(referência)* |
+| LLM | perfil `bonsai` (local, CPU) | outros perfis: modelos maiores, GPU ou API | ✅ perfis · online *(referência)* |
 
 ## Modelos locais
 
@@ -573,7 +618,7 @@ flowchart LR
     M1 -->|SHA-256| R[models/runtime/<br/>llamafile-0.10.6-thin]
     M2 -->|SHA-256| G[Bonsai-1.7B.gguf]
     M3 -->|SHA-256| E[embeddinggemma-300M-Q8_0.gguf]
-    R --> S1[start_llamafile.sh<br/>MODE=chat · GPU=auto]
+    R --> S1[start_llamafile.sh<br/>MODE=chat · CPU]
     G --> S1
     R --> S2[start_llamafile.sh<br/>MODE=embedding · CPU]
     E --> S2
@@ -600,9 +645,13 @@ O mesmo runtime oficial serve os dois modelos. Detalhes, licenças e a política
   | `--reasoning on`, GPU automática | 4/8 | ~6,0 s |
 
   O llamafile usa a GPU automaticamente quando encontra uma. As primeiras medições foram registradas como
-  "sem GPU", mas o log mostrou modo GPU; a tabela acima já está corrigida. O acerto não muda entre CPU e
-  GPU, só a latência. Por isso o chat roda com `GPU=auto`: aproveita a GPU se existir e cai para CPU sem
-  ela (como no CI). `GPU=disable` força CPU.
+  "sem GPU", mas o log mostrou modo GPU; a tabela acima já está corrigida.
+
+  ⚠️ **Segunda correção:** com prompts curtos como esses, a iGPU acertava o mesmo que a CPU, e por isso o
+  chat chegou a usar `GPU=auto` por padrão. Com o prompt real do agente (persona + 8 tools, ~2 mil tokens),
+  **a iGPU (Vulkan) passou a gerar lixo** ("texto texto texto…"), enquanto o mesmo prompt em CPU saía
+  coerente. É erro de cálculo, não de desempenho. **O padrão voltou a ser CPU** nos dois modos;
+  `GPU=auto` fica como opção para placas validadas.
 
 ### Perfis de LLM
 
@@ -623,8 +672,8 @@ OpenAI; trocar de modelo é mudar `LLM_PROFILE`, sem tocar no código.
 - **Tolerância a modelos pequenos:** o cliente normaliza argumentos de tool com JSON inválido ou entre cercas
   de código, recupera tool calls escritas como texto (`<tool_call>…</tool_call>`) e remove blocos `<think>`.
   Um argumento inválido vira um erro devolvido ao modelo, em vez de quebrar a conversa.
-- `uv run emporio llm check` testa um perfil de ponta a ponta: no Bonsai, contexto 8192, chat em ~1,4 s e
-  `detalhar_produto({"produto": "Takamine GD20"})` em ~7,5 s (com a iGPU).
+- `uv run emporio llm check` testa um perfil de ponta a ponta: contexto (8192 no Bonsai), uma resposta curta
+  e uma chamada de ferramenta.
 
 ### Embeddings: embeddinggemma-300m
 
@@ -698,7 +747,7 @@ flowchart TD
     end
     subgraph F4["④ Agente"]
         direction LR
-        C10["10 · perfis<br/>de LLM"]:::done --> C11["11 · agente<br/>host MCP"]:::next --> C12["12 · detecção<br/>de assunto"] --> C13["13 · chat +<br/>histórico"] --> C14["14 · guardrails"]
+        C10["10 · perfis<br/>de LLM"]:::done --> C11["11 · agente<br/>host MCP"]:::done --> C12["12 · detecção<br/>de assunto"]:::next --> C13["13 · chat +<br/>histórico"] --> C14["14 · guardrails"]
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR
@@ -732,7 +781,7 @@ src/emporio/     config.py (configuração validada), log.py (logs estruturados)
                  retrieval/ (documentos, montagem da busca), services.py (servidores locais),
                  domain/ (modelos, busca de políticas, catálogo, pedidos, pagamento/frete, horário),
                  mcp_server/ (servidor MCP, saídas estruturadas, persona),
-                 agent/ (cliente LLM com perfis; host MCP e loop: planejado)
+                 agent/ (cliente LLM com perfis, cliente MCP, agente com loop de tools)
 tests/contract/  suítes de contrato reutilizáveis por adaptador
 tests/           testes automatizados (unitários + integração com o LLM local)
 .github/         CI (GitHub Actions)
@@ -740,7 +789,9 @@ tests/           testes automatizados (unitários + integração com o LLM local
 
 ## Limitações conhecidas
 
-- O baseline 1.7B em CPU é lento (~18 s por chamada em média; ~5 s com GPU) e acerta tool calling só em parte dos casos. A detecção
+- O baseline 1.7B em CPU é lento: ~18 s por chamada com prompt curto e **~3 a 4 minutos por pergunta**
+  com o prompt completo do agente (persona + 8 tools, ~2 mil tokens). A GPU integrada desta máquina não
+  serve: corrompe prompts longos. Acerta tool calling só em parte dos casos. A detecção
   de assunto mitiga isso, mas não elimina.
 - O limiar de similaridade separa pouco: no conjunto de avaliação, a resposta certa menos parecida teve 0,313
   e a pergunta fora de escopo mais parecida, 0,292 (limiar 0,30). Ele é um filtro auxiliar; a defesa principal
@@ -782,6 +833,10 @@ Este projeto está sendo desenvolvido com o **Claude Code** como par de programa
   por causa de stopwords; a fusão quebrava se um resultado lexical não estivesse no índice vetorial; a
   suíte passou de 10 s para 118 s porque uma fixture de sessão subia o modelo real (corrigido para 12 s); e
   a porta 8081 desta máquina estava ocupada por outro serviço, o que levou à troca automática de porta.
+- **O teste de ponta a ponta derrubou uma decisão anterior:** a primeira conversa real do agente saiu como
+  lixo ("de de de a da…"). Isolando variáveis (sem tools, uma tool, oito tools; CPU × iGPU), a causa foi a
+  GPU integrada calculando errado com prompts longos. O padrão `GPU=auto` do chat, adotado com base em
+  testes de prompts curtos, voltou para CPU, e o README foi corrigido.
 - **Não confiar na memória sobre APIs:** o lock instalou o SDK `mcp` 2.x, em que `FastMCP` virou `MCPServer`
   e os campos passaram a snake_case, e o `openai` 3.x, que usa `httpx2` em vez de `httpx`. Antes de escrever
   cada camada, um protótipo validou os recursos usados; a dependência indireta usada diretamente (`httpx2`)

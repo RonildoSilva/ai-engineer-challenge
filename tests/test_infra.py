@@ -183,10 +183,10 @@ def test_start_rejects_invalid_mode():
 
 
 def test_start_defaults_gpu_policy():
-    """Chat usa a GPU se existir; embeddings sempre em CPU (lotes grandes derrubavam a iGPU)."""
+    """CPU por padrão: a iGPU (Vulkan) corrompia prompts longos e derrubava o driver."""
     script = (SCRIPTS / "start_llamafile.sh").read_text()
     chat, embedding = script.split("  embedding)")
-    assert 'GPU="${GPU:-auto}"' in chat
+    assert 'GPU="${GPU:-disable}"' in chat
     assert 'GPU="${GPU:-disable}"' in embedding
 
 
