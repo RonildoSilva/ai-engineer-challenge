@@ -17,6 +17,7 @@ import signal
 import socket
 import subprocess
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -238,3 +239,47 @@ def test_hybrid_search_with_real_embeddings_on_busy_port(built_store):
             assert hits[0].doc_id == "privacidade"
             assert "vector" in hits[0].ranks
             assert retriever.search("receita de bolo de cenoura") == []
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP])
+def test_mcp_shutdown_stops_embedding_server(tmp_path, built_store, sig):
+    """Encerrar o `emporio mcp` (kill ou terminal fechado) encerra o servidor de embeddings.
+
+    Regressão: o uvicorn re-dispara o SIGTERM após o desligamento gracioso; sem tratar o sinal,
+    o processo morria sem rodar a limpeza e o llamafile de embeddings ficava órfão.
+    """
+    if not EMBED_MODEL.exists():
+        pytest.skip("modelo de embeddings não baixado (./scripts/download_model.sh)")
+    import re
+
+    env = {
+        **os.environ,
+        "DATA_PROCESSED_DIR": str(built_store.parent),
+        "EMBEDDING_BACKEND": "llamafile",
+        "EMBEDDING_BASE_URL": f"http://127.0.0.1:{free_port()}/v1",
+    }
+    log_path = tmp_path / "mcp.log"
+    with log_path.open("w") as log_file:
+        proc = subprocess.Popen(
+            [str(ROOT / ".venv/bin/emporio"), "mcp", "--http", "--port", str(free_port())],
+            env=env, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
+        )  # fmt: skip
+    try:
+        deadline = time.time() + 120
+        while "MCP via" not in log_path.read_text() and time.time() < deadline:
+            assert proc.poll() is None, log_path.read_text()
+            time.sleep(0.5)
+        m = re.search(r"subindo servidor llamafile .*url=(http://[^\]\s]+)", log_path.read_text())
+        assert m, log_path.read_text()
+        embed_health = m.group(1).removesuffix("/v1") + "/health"
+        with urllib.request.urlopen(embed_health, timeout=5) as r:
+            assert json.load(r)["status"] == "ok"
+
+        proc.send_signal(sig)
+        proc.wait(timeout=60)
+        time.sleep(1)
+        with pytest.raises(urllib.error.URLError):  # porta fechada: servidor encerrado
+            urllib.request.urlopen(embed_health, timeout=3)
+    finally:
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)

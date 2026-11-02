@@ -114,6 +114,10 @@ mark-parentheses = false
     "PLC0415",  # imports locais isolam dependências em testes específicos
     "ARG001", "ARG002",  # fixtures usadas pelo efeito colateral
 ]
+"src/emporio/mcp_server/server.py" = [
+    "FBT001", "FBT002",  # parâmetros das tools viram JSON Schema e são sempre chamados por nome
+    "PLR0917",
+]
 "scripts/**" = [
     "T20",      # scripts imprimem resultados no terminal
     "PLR2004",

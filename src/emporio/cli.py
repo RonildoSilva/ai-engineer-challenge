@@ -14,11 +14,13 @@ emporio order return 7 --contato … --motivo "me arrependi" troca/devolução c
 emporio rules pay 599.90 [--promo] [--parcelas 10]         formas de pagamento e parcelamento
 emporio rules ship 349.90 --cidade "Campo Grande"          frete
 emporio rules hours [--at 2026-11-02T10:00]                loja aberta/fechada agora
+emporio mcp [--http] [--host 127.0.0.1] [--port 8000]      servidor MCP (stdio ou Streamable HTTP)
 """
 
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 from datetime import datetime
 
@@ -33,6 +35,7 @@ from emporio.domain.orders import OrderService
 from emporio.domain.policies import PolicyStore
 from emporio.domain.store_hours import store_status, weekly_hours
 from emporio.log import configure_logging, get_logger
+from emporio.mcp_server.server import build_server
 from emporio.pipeline.core import PipelineError
 from emporio.pipeline.stages import build_pipeline
 from emporio.retrieval.factory import build_retriever
@@ -111,6 +114,11 @@ def _parser() -> argparse.ArgumentParser:
     ship.add_argument("--categoria", type=int)
     hours = rules.add_parser("hours", help="loja aberta ou fechada")
     hours.add_argument("--at", help="data/hora ISO (padrão: agora, em Campo Grande)")
+
+    mcp = sub.add_parser("mcp", help="servidor MCP (stdio por padrão)")
+    mcp.add_argument("--http", action="store_true", help="Streamable HTTP em /mcp")
+    mcp.add_argument("--host", default="127.0.0.1")
+    mcp.add_argument("--port", type=int, default=8000)
     return p
 
 
@@ -268,7 +276,39 @@ def _rules_cmd(args: argparse.Namespace, settings: Settings) -> int:  # noqa: AR
     return 0
 
 
+def _mcp_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    """Servidor MCP. O servidor de embeddings sobe junto e é encerrado ao sair."""
+
+    def run(url: str | None) -> int:
+        server = build_server(settings, embedding_url=url)
+        if args.http:
+            import uvicorn  # noqa: PLC0415 — só o transporte HTTP precisa do servidor ASGI
+
+            log.info(
+                "MCP via Streamable HTTP", extra={"url": f"http://{args.host}:{args.port}/mcp"}
+            )
+            uvicorn.run(
+                server.streamable_http_app(), host=args.host, port=args.port, log_level="warning"
+            )
+        else:
+            server.run("stdio")  # stdout é do protocolo: logs vão para stderr
+        return 0
+
+    return _with_embeddings(settings, run)
+
+
+def _exit_on_signal(signum: int, _frame: object) -> None:
+    """SIGTERM/SIGHUP viram `SystemExit`: blocos `finally` rodam e servidores filhos são encerrados.
+
+    Sem isso, o processo morre na hora (o uvicorn, por exemplo, re-dispara o SIGTERM depois do
+    desligamento gracioso) e o servidor de embeddings iniciado por `ensure_server` fica órfão.
+    """
+    raise SystemExit(128 + signum)
+
+
 def main(argv: list[str] | None = None) -> int:
+    for sig in (signal.SIGTERM, signal.SIGHUP):  # kill e terminal fechado
+        signal.signal(sig, _exit_on_signal)
     args = _parser().parse_args(argv)
     try:
         settings = Settings()
@@ -285,6 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         "catalog": _catalog_cmd,
         "order": _order_cmd,
         "rules": _rules_cmd,
+        "mcp": _mcp_cmd,
     }
     try:
         return commands[args.command](args, settings)

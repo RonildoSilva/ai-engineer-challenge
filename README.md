@@ -22,6 +22,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 - [Busca híbrida](#busca-híbrida)
 - [Catálogo](#catálogo)
 - [Pedidos e regras da loja](#pedidos-e-regras-da-loja)
+- [Servidor MCP (a API)](#servidor-mcp-a-api)
 - [Camada de dados](#camada-de-dados)
 - [Escalabilidade e robustez](#escalabilidade-e-robustez)
 - [Modelos locais](#modelos-locais)
@@ -209,6 +210,8 @@ uv run emporio order return 7 --contato leticia.rocha@jmail.com --motivo "veio c
 uv run emporio rules pay 599.90 --parcelas 10      # PIX, débito, boleto e parcelamento válido
 uv run emporio rules ship 349.90 --cidade "Campo Grande"
 uv run emporio rules hours                         # aberta/fechada agora (fuso de Campo Grande)
+uv run emporio mcp                                 # servidor MCP via stdio (para agentes e Claude Desktop)
+uv run emporio mcp --http --port 8000              # servidor MCP via Streamable HTTP em /mcp
 ```
 
 > Chat, servidor MCP e avaliação serão documentados aqui conforme forem implementados.
@@ -229,8 +232,8 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>356 testes, ~20 s, offline]
-        L3 --> L4[pytest -m integration<br/>5 testes, sobe os modelos reais]
+        L2 --> L3[pytest unitário<br/>382 testes, ~20 s, offline]
+        L3 --> L4[pytest -m integration<br/>7 testes, sobe os modelos reais]
     end
     K -.-> K2
 ```
@@ -257,8 +260,9 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Manual de políticas | extração em seções numeradas (listas não viram seção, números não quebram), curadoria completa e em dia com o PDF, **fato ausente / seção do PDF alterada / seção sem curadoria detectados**, decisões aplicadas, busca por assunto (15 perguntas reais + 3 fora de escopo), CLI (38) | `tests/test_policies.py` |
 | Catálogo | preço com promoção × PIX (§6.2), faixa de preço e categoria extraídas do texto, acessórios × "violão de 7 cordas", exemplo do enunciado ("violões até R$1000": 12 opções), preço promocional nos filtros, nome aproximado e pergunta inteira ("Quanto custa o Takamine GD20?"), ambiguidade, alternativas para esgotado/descontinuado/em breve, CLI (62) | `tests/test_catalog.py` |
 | Pedidos e regras | verificação por e-mail ou telefone **do titular** (com/sem DDD, +55) e mensagem neutra em qualquer falha, e-mail duplicado só abre o próprio pedido, pedido atrasado, prazos de arrependimento/defeito/preferência dentro e fora da janela, garantia legal, parcelamento pelas faixas da §3.1, frete metropolitano × outras cidades × frete especial, feriados (Páscoa calculada) e fuso de Campo Grande, CLI (70) | `tests/test_orders_rules.py` |
+| Servidor MCP | exatamente as 8 tools, todas somente leitura e com saída estruturada; nenhuma forma de listar clientes; respostas de cada tool (GD20, promoção sem PIX, alternativas, escopos, pedido verificado e não verificado, devolução, pagamento, frete, horário, políticas); erro esperado amigável, argumento inválido rejeitado, **erro inesperado sem detalhes internos**, **logs sem e-mail/telefone**; resources e prompt; transportes **stdio e HTTP** com subprocesso real (26) | `tests/test_mcp_server.py` |
 | Busca | documentos (descrição suja não entra), índice vetorial, **suíte de contrato do `Retriever`** (lexical e híbrido), fusão RRF, limiar de similaridade, **degradação para lexical** (serviço fora do ar, índice vazio, modelo trocado) e recuperação, cache de vetores, etapa sem modelo, CLI (44) | `tests/test_retrieval.py`, `tests/contract/` |
-| Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo") (5) | `tests/test_llm_integration.py` |
+| Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo"); **encerrar o `emporio mcp` (SIGTERM ou SIGHUP) encerra o servidor de embeddings** (7) | `tests/test_llm_integration.py` |
 
 ## Pipeline de dados
 
@@ -452,6 +456,63 @@ referência. O pedido 8 aparece como **atrasado** (previsão de entrega vencida)
 | Frete (§5) | Campo Grande: motoboy, 1 a 3 dias úteis, grátis a partir de R$ 500 (senão R$ 35). Outras cidades: SEDEX, Jadlog e PAC com prazos e valor pelo CEP. Baterias, pianos e contrabaixos acústicos: frete especial |
 | Horário (§2) | Seg–sex 09–18h, sáb 09–13h, domingo e feriados fechado, no fuso de Campo Grande. Feriados nacionais, Sexta-feira Santa (calculada a partir da Páscoa), 11/10 (MS) e 26/08 (Campo Grande). Diz quando a loja abre de novo |
 
+## Servidor MCP (a API)
+
+`src/emporio/mcp_server/` expõe o domínio pelo [Model Context Protocol](https://modelcontextprotocol.io)
+(SDK oficial `mcp` 2.x). É uma camada fina: cada tool traduz a chamada para o domínio e devolve **saída
+estruturada** com um campo `resposta` já redigido pelas regras e, quando preciso, uma `orientacao` para o
+agente.
+
+```mermaid
+flowchart LR
+    subgraph Clientes
+        A[Agente da loja<br/>commit 11]
+        CD[Claude Desktop /<br/>Claude Code]
+        IN[MCP Inspector]
+    end
+    A & CD & IN -->|stdio ou<br/>Streamable HTTP| S
+    subgraph S[emporio mcp]
+        T[8 tools<br/>somente leitura]
+        R[resources<br/>políticas · categorias]
+        P[prompt<br/>persona_atendente]
+    end
+    T --> D[domínio:<br/>catálogo · pedidos · regras · políticas]
+    R --> D
+    D --> DB[(store.db ·<br/>policies.json ·<br/>vectors.db)]
+```
+
+| Tool | Para quê |
+|---|---|
+| `buscar_produtos(texto, categoria, preco_min, preco_max, apenas_disponiveis, limite)` | opções com preço, promoção e PIX; filtros inferidos do texto |
+| `detalhar_produto(produto)` | um modelo (nome aproximado, pergunta inteira ou id), com alternativas se indisponível |
+| `consultar_pedido(numero_pedido, email_ou_telefone)` | status, itens, total e rastreio, **só para o titular** |
+| `verificar_devolucao(numero_pedido, email_ou_telefone, motivo)` | troca/devolução pelas regras do manual |
+| `simular_pagamento(valor, preco_promocional, parcelas)` | PIX, débito, boleto e parcelamento válido |
+| `calcular_frete(valor_pedido, cidade, produto_ou_categoria)` | Campo Grande, outras cidades, frete especial |
+| `status_loja()` | aberta ou fechada agora, próxima abertura |
+| `consultar_politica(pergunta, limite)` | seções do manual relevantes (busca híbrida) |
+
+- **Resources:** `politicas://indice` (seções com **custo estimado em tokens**, para o orçamento de contexto),
+  `politicas://{secao}` e `catalogo://categorias`.
+- **Prompt** `persona_atendente`: a "Mel", com o tom da §7.1 e as regras que ela nunca quebra.
+- **Segurança:** todas as tools são somente leitura (anotação `read_only_hint`); nenhuma lista clientes; erros
+  inesperados chegam ao cliente sem detalhes internos; os logs mascaram e-mail e telefone.
+- **Ciclo de vida:** `emporio mcp` sobe o servidor de embeddings junto e o encerra ao sair, inclusive com
+  SIGTERM ou terminal fechado (há teste de regressão que falha sem essa proteção).
+
+Para usar no Claude Desktop ou no Claude Code, aponte para o comando (stdio):
+
+```json
+{
+  "mcpServers": {
+    "emporio": {
+      "command": "uv",
+      "args": ["run", "--directory", "/caminho/para/ai-engineer-challenge", "emporio", "mcp"]
+    }
+  }
+}
+```
+
 ## Camada de dados
 
 ```mermaid
@@ -493,7 +554,8 @@ interfaces.
 | Dados | SQLite somente leitura atrás de `Repository` | Postgres (mesma suíte de contrato) | ✅ SQLite · Postgres *(planejado)* |
 | Busca | híbrida (lexical + vetores em SQLite, fusão RRF) atrás de `Retriever`; degrada para lexical | pgvector (mesma suíte de contrato) | ✅ híbrida · pgvector *(planejado)* |
 | Embeddings | embeddinggemma-300m no runtime llamafile, em CPU, atrás de `Embedder` | API de embeddings ou GPU | ✅ |
-| Serviços locais | sobem sob demanda e encerram ao final; porta ocupada → porta livre; log em arquivo | serviços dedicados (systemd/containers) | ✅ |
+| API | servidor MCP via stdio ou Streamable HTTP (local, sem autenticação) | MCP HTTP atrás de API gateway com OAuth, réplicas | ✅ MCP · auth *(planejado)* |
+| Serviços locais | sobem sob demanda e encerram ao final (também com SIGTERM/SIGHUP); porta ocupada → porta livre; log em arquivo | serviços dedicados (systemd/containers) | ✅ |
 | LLM | Bonsai-1.7B em CPU | modelos maiores, GPU ou API | ✅ baseline |
 
 ## Modelos locais
@@ -564,7 +626,7 @@ Detalhes e como adicionar modelos: [`models/README.md`](models/README.md).
 
 | Decisão | Escolha | Justificativa |
 |---|---|---|
-| API de negócio | **Servidor MCP** (SDK oficial `mcp`) | Separa regras de negócio da orquestração; interoperável (Claude Desktop, Inspector, llamafile); primitivas certas (tools, resources, prompts). |
+| API de negócio | **Servidor MCP** (SDK oficial `mcp` 2.x, `MCPServer`) | Separa regras de negócio da orquestração; interoperável (Claude Desktop, Inspector, llamafile); primitivas certas (tools, resources, prompts). |
 | Abordagem | Function calling + **detecção de assunto com pré-busca** para todos os modelos | Dados exatos vêm de código testado; compensa a fraqueza de modelos pequenos em tool calling. |
 | LLM | Cliente compatível com OpenAI, **perfis** offline/online | Um caminho de código para llamafile, Ollama, APIs. Começamos por modelos pequenos (≤ 4B). |
 | Baseline | Bonsai-1.7B via llamafile 0.10.6 | Gratuito, offline, ~250 MB; usa GPU se houver, CPU se não. |
@@ -607,11 +669,11 @@ flowchart TD
     end
     subgraph F3["③ Domínio e API"]
         direction LR
-        C7["7 · catálogo"]:::done --> C8["8 · pedidos<br/>e regras"]:::done --> C9["9 · servidor<br/>MCP"]:::next
+        C7["7 · catálogo"]:::done --> C8["8 · pedidos<br/>e regras"]:::done --> C9["9 · servidor<br/>MCP"]:::done
     end
     subgraph F4["④ Agente"]
         direction LR
-        C10["10 · perfis<br/>de LLM"] --> C11["11 · agente<br/>host MCP"] --> C12["12 · detecção<br/>de assunto"] --> C13["13 · chat +<br/>histórico"] --> C14["14 · guardrails"]
+        C10["10 · perfis<br/>de LLM"]:::next --> C11["11 · agente<br/>host MCP"] --> C12["12 · detecção<br/>de assunto"] --> C13["13 · chat +<br/>histórico"] --> C14["14 · guardrails"]
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR
@@ -643,8 +705,8 @@ src/emporio/     config.py (configuração validada), log.py (logs estruturados)
                  pipeline/ (orquestrador + etapas), data/ (contratos, regras, schema.sql, policies.py),
                  ports.py (interfaces), adapters/ (SQLite, embedders, índice vetorial, buscas),
                  retrieval/ (documentos, montagem da busca), services.py (servidores locais),
-                 domain/ (modelos, busca de políticas, catálogo, pedidos, pagamento/frete, horário);
-                 agente e servidor MCP (planejado)
+                 domain/ (modelos, busca de políticas, catálogo, pedidos, pagamento/frete, horário),
+                 mcp_server/ (servidor MCP, saídas estruturadas, persona); agente (planejado)
 tests/contract/  suítes de contrato reutilizáveis por adaptador
 tests/           testes automatizados (unitários + integração com o LLM local)
 .github/         CI (GitHub Actions)
@@ -660,6 +722,8 @@ tests/           testes automatizados (unitários + integração com o LLM local
 - Indexar os 75 documentos em CPU leva ~1 minuto na primeira vez (depois, só o que muda é recalculado).
 - O valor do frete para outras cidades não é calculado (depende de CEP, peso, dimensões e APIs das
   transportadoras); o agente informa os prazos e que o valor sai no fechamento.
+- O servidor MCP via HTTP não tem autenticação: escuta só em `127.0.0.1` por padrão. Em produção, ficaria
+  atrás de um gateway com OAuth (o SDK já oferece suporte).
 - A verificação de identidade aceita o telefone sem DDD (8+ dígitos finais): é prática para o cliente, mas
   mais fraca que um código por SMS/e-mail (OTP), que seria o próximo passo em produção.
 - *(Lista completa e "o que faria com mais tempo" ao final do projeto.)*
@@ -690,6 +754,12 @@ Este projeto está sendo desenvolvido com o **Claude Code** como par de programa
   por causa de stopwords; a fusão quebrava se um resultado lexical não estivesse no índice vetorial; a
   suíte passou de 10 s para 118 s porque uma fixture de sessão subia o modelo real (corrigido para 12 s); e
   a porta 8081 desta máquina estava ocupada por outro serviço, o que levou à troca automática de porta.
+- **Não confiar na memória sobre APIs:** o lock instalou o SDK `mcp` 2.x, em que `FastMCP` virou `MCPServer`
+  e os campos passaram a snake_case. Antes de escrever o servidor, um protótipo validou cada recurso usado.
+- **Lint e testes pegando bugs de produção no servidor MCP:** o campo `args` nos logs colidia com um
+  atributo interno do `LogRecord` (quebraria na primeira chamada de tool); e encerrar o `emporio mcp` com
+  SIGTERM ou fechando o terminal deixava o servidor de embeddings órfão. A correção tem teste de regressão,
+  verificado falhando sem ela.
 - **Olhar os dados antes de prometer o exemplo:** ao preparar as regras de devolução, o levantamento mostrou
   que nenhum pedido está na janela de arrependimento com a data de referência; o README e os exemplos
   assumem isso em vez de forçar um caso que os dados não sustentam.
