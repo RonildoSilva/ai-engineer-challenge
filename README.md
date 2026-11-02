@@ -1,5 +1,7 @@
 # Empório da Música — Agente de Atendimento
 
+[![ci](https://github.com/RonildoSilva/ai-engineer-challenge/actions/workflows/ci.yml/badge.svg)](https://github.com/RonildoSilva/ai-engineer-challenge/actions/workflows/ci.yml)
+
 Protótipo de agente de atendimento por texto para a loja fictícia **Empório da Música**, em Campo Grande/MS.
 As regras de negócio ficam expostas por um **servidor MCP**. O agente conversa com **LLMs locais ou online**,
 e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafile.
@@ -14,6 +16,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 - [Pré-requisitos](#pré-requisitos)
 - [Setup](#setup)
 - [Como rodar](#como-rodar)
+- [Verificação (testes e CI)](#verificação-testes-e-ci)
 - [Modelo local (baseline)](#modelo-local-baseline)
 - [Decisões técnicas](#decisões-técnicas)
 - [Tratamento de dados e suposições](#tratamento-de-dados-e-suposições)
@@ -184,6 +187,43 @@ e `REASONING` (`off` por padrão).
 
 > Chat completo, servidor MCP, testes e avaliação serão documentados aqui conforme forem implementados.
 
+## Verificação (testes e CI)
+
+Cada push reproduz o setup **do zero numa máquina limpa** (GitHub Actions, Ubuntu 24.04) e roda a mesma
+verificação disponível localmente. É a garantia de que o projeto funciona fora da máquina de
+desenvolvimento.
+
+```mermaid
+flowchart LR
+    P([push / PR]) --> CI
+    subgraph CI[GitHub Actions · ubuntu-24.04 limpo]
+        direction LR
+        U[uv fixado<br/>instalador oficial] --> S[scripts/setup.sh<br/>Python + deps + modelo<br/>com SHA-256] --> K[scripts/check.sh]
+    end
+    subgraph K2[scripts/check.sh]
+        direction TB
+        L1[uv lock --check] --> L2[ruff check + format]
+        L2 --> L3[pytest unitário<br/>~1 s, offline]
+        L3 --> L4[pytest -m integration<br/>sobe o Bonsai real]
+    end
+    K -.-> K2
+```
+
+```bash
+./scripts/check.sh          # tudo: lock, lint, unitários e integração (~20 s com o modelo baixado)
+FAST=1 ./scripts/check.sh   # sem integração
+uv run pytest -m integration -rs   # só a integração com o LLM local
+```
+
+| Camada | O que garante | Arquivo |
+|---|---|---|
+| Versões fixadas | Python exato e gerenciado, `requires-python`, uv no setup e no README, `uv.lock` atualizado | `tests/test_infra.py` |
+| Manifesto | URLs fixadas em tag/commit (nunca `main`/`latest`), SHA-256 válido, artefatos baixados íntegros | `tests/test_infra.py` |
+| Download | baixa, é idempotente, **recusa checksum errado** sem deixar lixo, não sobrescreve arquivo corrompido sem `FORCE=1` | `tests/test_infra.py` |
+| Scripts | sintaxe bash válida, executáveis, erro claro sem artefatos | `tests/test_infra.py` |
+| `.gitignore` | binários, `.env`, `_raw/` e gerados fora do git; manifesto, `.env.example` e dados brutos dentro | `tests/test_infra.py` |
+| LLM real | servidor sobe pelo script, contexto 8192, alias `bonsai`, responde chat e devolve **tool call estruturado** | `tests/test_llm_integration.py` |
+
 ## Modelo local (baseline)
 
 ```mermaid
@@ -203,7 +243,7 @@ flowchart LR
   treino 32k (usamos 8k).
 - **Runtime e GGUF separados**, ambos de fontes oficiais com checksum. O `.llamafile` único usado no início
   do desenvolvimento é exatamente essa combinação: o GGUF embutido nele tem SHA-256 idêntico ao oficial.
-- **Medições iniciais** (CPU 8 vCPU, sem GPU, 4 perguntas × 2 execuções, 2 tools no prompt):
+- **Medições iniciais** (exploratórias, não fazem parte do CI) (CPU 8 vCPU, sem GPU, 4 perguntas × 2 execuções, 2 tools no prompt):
 
   | Configuração | Tool calls corretas | Tempo médio |
   |---|---|---|
@@ -241,7 +281,7 @@ Detalhes e como adicionar modelos: [`models/README.md`](models/README.md).
 
 ```mermaid
 flowchart LR
-    C1[1 · estrutura +<br/>setup reprodutível]:::wip --> C2[2 · relatório<br/>de dados] --> C3[3 · dados<br/>SQLite] --> C4[4 · políticas] --> C5[5-6 · domínio<br/>regras] --> C7[7 · servidor<br/>MCP]
+    C1[1 · estrutura +<br/>setup reprodutível]:::done --> C1b[1b · testes +<br/>CI do setup]:::wip --> C2[2 · relatório<br/>de dados] --> C3[3 · dados<br/>SQLite] --> C4[4 · políticas] --> C5[5-6 · domínio<br/>regras] --> C7[7 · servidor<br/>MCP]
     C7 --> C8[8 · perfis<br/>de LLM] --> C9[9 · agente<br/>host MCP] --> C10[10 · detecção<br/>de assunto] --> C11[11 · CLI +<br/>histórico] --> C12[12 · guardrails] --> C13[13 · eval] --> C14[14 · exemplos] --> C15[15 · README<br/>final]
     classDef wip fill:#fde68a,stroke:#b45309,color:#000
     classDef done fill:#bbf7d0,stroke:#15803d,color:#000
@@ -257,9 +297,10 @@ docs/            relatório de dados, workflow com IA              (planejado)
 evals/           cenários e resultados por modelo                 (planejado)
 examples/        conversas de exemplo                             (planejado)
 models/          manifest.tsv (versionado) + binários (não versionados)
-scripts/         setup, download de modelos, start do llamafile, smoke test
+scripts/         setup, verificação (check.sh), download de modelos, start do llamafile, smoke test
 src/emporio/     agente e servidor MCP
-tests/           testes automatizados
+tests/           testes automatizados (unitários + integração com o LLM local)
+.github/         CI (GitHub Actions)
 ```
 
 ## Limitações conhecidas

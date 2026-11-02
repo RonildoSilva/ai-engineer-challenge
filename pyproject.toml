@@ -40,6 +40,9 @@ packages = ["src/emporio"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-m 'not integration'"   # padrão rápido; integração: pytest -m integration
+markers = ["integration: sobe o LLM local real (lento, requer artefatos baixados)"]
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,41 @@
+# CI: reproduz o setup do zero numa máquina limpa e roda toda a verificação.
+# É a garantia de que o que está no repositório funciona fora da máquina de desenvolvimento.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instala uv (versão fixada, instalador oficial)
+        run: |
+          UV_VERSION=$(grep -oP 'UV_VERSION_PINNED="\K[\d.]+' scripts/setup.sh)
+          curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Runtime + modelo (~290 MB) em cache, invalidado se o manifesto mudar.
+      # O setup.sh verifica o SHA-256 de qualquer forma (cache corrompido = falha).
+      - name: Cache dos artefatos do modelo
+        uses: actions/cache@v4
+        with:
+          path: |
+            models/runtime
+            models/bonsai-1.7b
+          key: models-${{ hashFiles('models/manifest.tsv') }}
+
+      - name: Setup do zero (scripts/setup.sh)
+        run: ./scripts/setup.sh
+
+      - name: Verificação completa (scripts/check.sh)
+        run: ./scripts/check.sh

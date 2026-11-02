@@ -3,11 +3,12 @@
 #
 # Uso:  ./scripts/download_model.sh [id]        (default: bonsai-1.7b)
 #       FORCE=1 ./scripts/download_model.sh     (rebaixa mesmo se já existir)
+#       MANIFEST=outro.tsv ./scripts/download_model.sh x   (manifesto alternativo; usado nos testes)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ID="${1:-bonsai-1.7b}"
-MANIFEST="$ROOT/models/manifest.tsv"
+MANIFEST="${MANIFEST:-$ROOT/models/manifest.tsv}"
 
 line="$(grep -v '^#' "$MANIFEST" | awk -F'\t' -v id="$ID" '$1 == id')"
 if [[ -z "$line" ]]; then
@@ -15,7 +16,7 @@ if [[ -z "$line" ]]; then
   exit 1
 fi
 IFS=$'\t' read -r _ dest url sha <<<"$line"
-dest="$ROOT/$dest"
+[[ "$dest" = /* ]] || dest="$ROOT/$dest"   # destino relativo à raiz do projeto
 
 verify() { echo "$sha  $1" | sha256sum --check --status; }
 
