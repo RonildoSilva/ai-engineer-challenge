@@ -546,16 +546,34 @@ Relatório completo, com modelo ER, gráficos e uma decisão para cada achado:
 ## Roadmap
 
 ```mermaid
-flowchart LR
-    C1[1 · estrutura +<br/>setup]:::done --> C1b[1b · testes + CI]:::done --> C2[2 · relatório<br/>de dados]:::done --> C3[3 · pipeline +<br/>config + CLI]:::done
-    C3 --> C4[4 · dados<br/>SQLite]:::done --> C4b[4b · lint<br/>ampliado]:::done --> C5[5 · políticas]:::done --> C6a[6a · avaliação e<br/>modelo de embeddings]:::done --> C6[6b · busca híbrida]:::done --> C7[7 · catálogo]:::done --> C8[8 · pedidos e<br/>regras]:::next
-    C8 --> C9[9 · servidor MCP] --> C10[10 · perfis LLM] --> C11[11 · agente] --> C12[12 · detecção<br/>de assunto] --> C13[13 · chat +<br/>histórico]
-    C13 --> C14[14 · guardrails] --> C15[15 · eval] --> C16[16 · escala<br/>Postgres/pgvector] --> C17[17 · exemplos] --> CX[19-21 · Airflow,<br/>REST, UI] --> C18[README final]
+flowchart TD
+    subgraph F1["① Fundação"]
+        direction LR
+        C1["1 · estrutura<br/>+ setup"]:::done --> C1b["1b · testes<br/>+ CI"]:::done --> C2["2 · relatório<br/>de dados"]:::done --> C3["3 · pipeline<br/>+ config + CLI"]:::done
+    end
+    subgraph F2["② Dados e conhecimento"]
+        direction LR
+        C4["4 · dados<br/>SQLite"]:::done --> C4b["4b · lint<br/>ampliado"]:::done --> C5["5 · políticas"]:::done --> C6a["6a · modelo de<br/>embeddings"]:::done --> C6b["6b · busca<br/>híbrida"]:::done
+    end
+    subgraph F3["③ Domínio e API"]
+        direction LR
+        C7["7 · catálogo"]:::done --> C8["8 · pedidos<br/>e regras"]:::next --> C9["9 · servidor<br/>MCP"]
+    end
+    subgraph F4["④ Agente"]
+        direction LR
+        C10["10 · perfis<br/>de LLM"] --> C11["11 · agente<br/>host MCP"] --> C12["12 · detecção<br/>de assunto"] --> C13["13 · chat +<br/>histórico"] --> C14["14 · guardrails"]
+    end
+    subgraph F5["⑤ Qualidade e entrega"]
+        direction LR
+        C15["15 · avaliação"] --> C16["16 · escala<br/>Postgres/pgvector"] --> C17["17 · exemplos"] --> CX["19–21 · Airflow,<br/>REST, UI"] --> C18["README final"]
+    end
+    F1 --> F2 --> F3 --> F4 --> F5
     classDef next fill:#fde68a,stroke:#b45309,color:#000
     classDef done fill:#bbf7d0,stroke:#15803d,color:#000
 ```
 
-Verde: concluído. Amarelo: próximo. Extras previstos: endpoint REST `/chat`, interface gráfica e template de DAG do Airflow.
+Verde: concluído. Amarelo: próximo. Os extras (19–21: endpoint REST `/chat`, interface gráfica e template de
+DAG do Airflow) entram antes do README final.
 
 ## Estrutura do repositório
 
