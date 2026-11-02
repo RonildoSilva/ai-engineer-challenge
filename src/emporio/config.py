@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     project_root: Path = PROJECT_ROOT
     data_raw_dir: Path = Path("data/raw")
     data_processed_dir: Path = Path("data/processed")
+    data_curated_dir: Path = Path("data/curated")  # revisões manuais versionadas
 
     # --- regras de negócio ----------------------------------------------------------
     # "Hoje" das regras de prazo: os pedidos do dataset vão até 2026-03-22.
@@ -59,6 +60,14 @@ class Settings(BaseSettings):
     @property
     def processed_dir(self) -> Path:
         return self.path(self.data_processed_dir)
+
+    @property
+    def policies_curated_dir(self) -> Path:
+        return self.path(self.data_curated_dir) / "politicas"
+
+    @property
+    def policies_json(self) -> Path:
+        return self.processed_dir / "policies.json"
 
     @property
     def store_db(self) -> Path:

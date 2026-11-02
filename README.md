@@ -18,6 +18,8 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 - [Como rodar](#como-rodar)
 - [Verificação (testes e CI)](#verificação-testes-e-ci)
 - [Pipeline de dados](#pipeline-de-dados)
+- [Manual de políticas](#manual-de-políticas)
+- [Camada de dados](#camada-de-dados)
 - [Escalabilidade e robustez](#escalabilidade-e-robustez)
 - [Modelo local (baseline)](#modelo-local-baseline)
 - [Decisões técnicas](#decisões-técnicas)
@@ -192,6 +194,8 @@ e `REASONING` (`off` por padrão).
 uv run emporio pipeline run            # pipeline de dados (pula o que está em dia)
 uv run emporio pipeline status         # estado de cada etapa
 uv run emporio pipeline graph          # DAG em Mermaid
+uv run emporio policies list           # seções do manual de políticas publicadas
+uv run emporio policies search "posso devolver?"   # seção mais relevante para a pergunta
 ```
 
 > Chat, servidor MCP e avaliação serão documentados aqui conforme forem implementados.
@@ -212,14 +216,14 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>136 testes, ~4 s, offline]
+        L2 --> L3[pytest unitário<br/>174 testes, ~10 s, offline]
         L3 --> L4[pytest -m integration<br/>3 testes, sobe o Bonsai real]
     end
     K -.-> K2
 ```
 
 ```bash
-./scripts/check.sh          # tudo: lock, lint, unitários e integração (~25 s com o modelo baixado)
+./scripts/check.sh          # tudo: lock, lint, unitários e integração (~30 s com o modelo baixado)
 FAST=1 ./scripts/check.sh   # sem integração
 uv run pytest -m integration -rs   # só a integração com o LLM local
 ```
@@ -237,6 +241,7 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Config, logs e CLI | defaults, sobrescrita por ambiente, **config inválida falha cedo**, logs texto/JSON, `emporio pipeline` e códigos de saída (12) | `tests/test_config_cli.py` |
 | Camada de dados | regras de tratamento, 7 tipos de linha inválida reportados com `arquivo:linha campo`, integridade referencial, **7 violações barradas pelos `CHECK`s do banco**, banco anterior intacto quando a validação falha, mudança de regra refaz o `transform` (41) | `tests/test_data_layer.py` |
 | Repository | **suíte de contrato** (22, reutilizável para o Postgres) + somente leitura, injeção de SQL, uma conexão por thread (4) | `tests/contract/`, `tests/test_sqlite_repository.py` |
+| Manual de políticas | extração em seções numeradas (listas não viram seção, números não quebram), curadoria completa e em dia com o PDF, **fato ausente / seção do PDF alterada / seção sem curadoria detectados**, decisões aplicadas, busca por assunto (15 perguntas reais + 3 fora de escopo), CLI (38) | `tests/test_policies.py` |
 | LLM real | servidor sobe pelo script, contexto 8192, alias `bonsai`, responde chat e devolve **tool call estruturado** (3) | `tests/test_llm_integration.py` |
 
 ## Pipeline de dados
@@ -248,7 +253,7 @@ CLI `emporio pipeline`. Etapas em verde já existem; as demais entram nos próxi
 flowchart LR
     S[snapshot_raw<br/>inventário + hashes<br/>das fontes]:::done --> V[validate_raw<br/>contratos dos CSVs<br/>+ integridade]:::done
     V --> T[transform<br/>decisões do relatório]:::done --> L[load<br/>SQLite com CHECKs]:::done --> Q[quality_checks<br/>invariantes]:::done
-    S --> PE[extract_policies<br/>PDF → texto normalizado] --> PS[policies<br/>seções curadas]
+    S --> PE[extract_policies<br/>PDF → seções<br/>modo layout]:::done --> PS[build_policies<br/>curadoria verificada<br/>contra o PDF]:::done
     L --> C[chunk] --> E[embed] --> I[index<br/>vetores]
     PS --> C
     classDef done fill:#bbf7d0,stroke:#15803d,color:#000
@@ -261,6 +266,8 @@ flowchart LR
 | `transform` | Aplica as decisões do [relatório](docs/data_report.md): disponibilidade, descrição não confiável (7 itens), promoção vigente única, texto normalizado para busca, pagamento → forma + parcelas, dados mínimos do cliente | `staging/*.jsonl` |
 | `load` | Cria o banco a partir do [`schema.sql`](src/emporio/data/schema.sql) numa transação única; a troca do arquivo é atômica, então um erro mantém o banco anterior | `store.db` |
 | `quality_checks` | Invariantes no banco carregado (promoção coerente, nenhum pedido sem itens, descrição oculta…) + `PRAGMA integrity_check` | `quality_report.json` |
+| `extract_policies` | Extrai o PDF em modo *layout* (preserva tabelas e listas), remove cabeçalho/rodapé de página e divide nas seções numeradas do manual, com hash por seção | `policies_extracted.json` / `.md` |
+| `build_policies` | Valida a curadoria contra a extração (ver [Manual de políticas](#manual-de-políticas)) e publica as seções com palavras-chave e custo em tokens | `policies.json` |
 
 **Como o orquestrador decide o que rodar:**
 
@@ -286,6 +293,37 @@ flowchart TD
   progresso e não deixa estado inconsistente.
 - **Portável:** cada etapa é uma função `f(ctx) -> métricas` que não depende do runner, e corresponde 1:1 a
   uma task do Airflow ou do Dagster.
+
+## Manual de políticas
+
+O PDF é a fonte, mas o agente consome uma **versão curada e versionada** (`data/curated/politicas/*.md`):
+uma seção por tema, revisada à mão, com front matter (id, seções do PDF de origem, tipo, palavras-chave) e
+**notas de curadoria** para cada decisão. O pipeline impede que curadoria e PDF se desencontrem.
+
+```mermaid
+flowchart LR
+    PDF[politicas_da_loja.pdf] --> X[extract_policies<br/>seções + hash]
+    X --> B{build_policies}
+    CUR[curadoria .md<br/>+ _source.yaml] --> B
+    B -->|tudo confere| J[policies.json]
+    B -->|seção do PDF mudou<br/>desde a curadoria| F1[falha: aponta seção e arquivo<br/>→ revisar e `emporio policies lock`]
+    B -->|número do PDF ausente<br/>na curadoria| F2[falha: lista seção e valores]
+    B -->|seção sem curadoria| F3[falha]
+```
+
+- **Nenhum fato se perde na revisão:** todo número de cada seção do PDF (prazos, valores, horários,
+  telefones, leis) precisa aparecer na seção curada correspondente. Na primeira execução, essa verificação
+  pegou o rodapé "Versão 2.1 / 2025", que tinha ficado de fora.
+- **PDF novo não passa despercebido:** `_source.yaml` guarda o hash de cada seção usada na curadoria. Se o PDF
+  mudar, o pipeline aponta exatamente quais seções e arquivos revisar.
+- **Decisões explícitas** (notas de curadoria): os dois telefones com seus papéis (3341-4444 cadastral,
+  3321-4500 WhatsApp), o e-mail sem acento, e a regra de parcelamento da §3.1 prevalecendo sobre a tabela.
+- **Tipos:** `policy` (regra para o cliente) e `guideline` (instrução para o atendente, como tom de voz e
+  fluxo). O manual inteiro tem ~3,2 mil tokens estimados, então cabe até no contexto de 8k do Bonsai.
+- **Busca por assunto** (`PolicyStore.search`): determinística, por palavras-chave curadas (inclusive
+  coloquiais, como "me arrependi" e "dá pra parcelar"), título e corpo. Abaixo de um limiar mínimo, não
+  retorna nada, porque é melhor não pré-buscar do que pré-buscar a seção errada. É a base da detecção de
+  assunto; a busca semântica entra no próximo commit.
 
 ## Camada de dados
 
@@ -368,7 +406,7 @@ Detalhes e como adicionar modelos: [`models/README.md`](models/README.md).
 | Abordagem | Function calling + **detecção de assunto com pré-busca** para todos os modelos | Dados exatos vêm de código testado; compensa a fraqueza de modelos pequenos em tool calling. |
 | LLM | Cliente compatível com OpenAI, **perfis** offline/online | Um caminho de código para llamafile, Ollama, APIs. Começamos por modelos pequenos (≤ 4B). |
 | Baseline | Bonsai-1.7B via llamafile 0.10.6 | Gratuito, offline, CPU, ~250 MB. |
-| Políticas | Markdown por seção (resource MCP + tool) | Manual de ~3k tokens; vector DB seria overkill. |
+| Políticas | **Curadoria versionada** do PDF, verificada pelo pipeline (cobertura, versão do PDF, fatos), publicada por seção | O manual tem ~3,2 mil tokens; vector DB seria desproporcional. A revisão humana resolve as contradições do PDF, e a verificação automática garante que ela não perde nem desatualiza nada. |
 | Dados | CSV → validação → limpeza → **SQLite** (atrás de uma interface `Repository`) | Vem com o Python (zero dependência nova), um arquivo só, esquema com restrições que registram as decisões do relatório, SQL com parâmetros, mesmo motor para o histórico. Com 65 produtos, um servidor seria desproporcional; Postgres entra como adaptador de escala. |
 | Busca vetorial | Embeddings atrás de uma interface `Retriever`, vetores em SQLite por padrão | As perguntas centrais (preço, estoque, pedido) são exatas, e com 65 itens um índice vetorial dedicado não se paga. **pgvector** fica como adaptador de escala, testado no CI. |
 | Orquestração | **DAG próprio** (`emporio pipeline`), sem Airflow | Não há nada para agendar (dados estáticos, processados em menos de 1 s). Airflow exigiria scheduler, webserver e banco de metadados. Cada etapa corresponde 1:1 a uma task do Airflow quando houver sync com um sistema real. |
@@ -389,14 +427,14 @@ Relatório completo, com modelo ER, gráficos e uma decisão para cada achado:
 | Totais dos pedidos 3 e 20 ≠ soma dos itens | Vale o `total_brl` (valor cobrado) |
 | Não há data real de entrega; os dados vão até mar/2026 | `estimated_delivery` como proxy; `REFERENCE_DATE=2026-03-25` define o "hoje" |
 | E-mail duplicado (clientes 11 e 43) | Verificação por **pedido + e-mail/telefone do titular daquele pedido** (LGPD) |
-| PDF: 2 telefones, e-mail com e sem acento, regras de parcelamento contraditórias; extração com ~1 palavra por linha | Regra mais específica prevalece; PDF → markdown normalizado e revisado à mão |
+| PDF: 2 telefones, e-mail com e sem acento, regras de parcelamento contraditórias; extração com ~1 palavra por linha | Regra mais específica prevalece; extração em modo layout + [curadoria versionada e verificada](#manual-de-políticas) |
 
 ## Roadmap
 
 ```mermaid
 flowchart LR
     C1[1 · estrutura +<br/>setup]:::done --> C1b[1b · testes + CI]:::done --> C2[2 · relatório<br/>de dados]:::done --> C3[3 · pipeline +<br/>config + CLI]:::done
-    C3 --> C4[4 · dados<br/>SQLite]:::done --> C4b[4b · lint<br/>ampliado]:::done --> C5[5 · políticas]:::next --> C6[6 · busca híbrida<br/>embeddings] --> C7[7-8 · domínio]
+    C3 --> C4[4 · dados<br/>SQLite]:::done --> C4b[4b · lint<br/>ampliado]:::done --> C5[5 · políticas]:::done --> C6[6 · busca híbrida<br/>embeddings]:::next --> C7[7-8 · domínio]
     C7 --> C9[9 · servidor MCP] --> C10[10 · perfis LLM] --> C11[11 · agente] --> C12[12 · detecção<br/>de assunto] --> C13[13 · chat +<br/>histórico]
     C13 --> C14[14 · guardrails] --> C15[15 · eval] --> C16[16 · escala<br/>Postgres/pgvector] --> C17[17 · exemplos] --> CX[19-21 · Airflow,<br/>REST, UI] --> C18[README final]
     classDef next fill:#fde68a,stroke:#b45309,color:#000
@@ -410,7 +448,8 @@ Verde: concluído. Amarelo: próximo. Extras previstos: endpoint REST `/chat`, i
 ```
 config/          perfis de LLM                                   (planejado)
 data/raw/        CSVs e manual de políticas originais
-data/processed/  artefatos gerados (SQLite, políticas .md) — não versionado
+data/curated/    curadoria do manual (uma seção .md por tema + _source.yaml) — versionada
+data/processed/  artefatos gerados (SQLite, policies.json, extração do PDF) — não versionado
 docs/            relatório de dados (data_report.md); workflow com IA (planejado)
 evals/           cenários e resultados por modelo                 (planejado)
 examples/        conversas de exemplo                             (planejado)
@@ -418,8 +457,8 @@ models/          manifest.tsv (versionado) + binários (não versionados)
 scripts/         setup, verificação (check.sh), download de modelos, start do llamafile, smoke test,
                  exploração dos dados (explore_data.py)
 src/emporio/     config.py (configuração validada), log.py (logs estruturados), cli.py (emporio),
-                 pipeline/ (orquestrador + etapas), data/ (contratos, regras, schema.sql),
-                 ports.py (interfaces), adapters/ (SQLite), domain/ (modelos);
+                 pipeline/ (orquestrador + etapas), data/ (contratos, regras, schema.sql, policies.py),
+                 ports.py (interfaces), adapters/ (SQLite), domain/ (modelos, busca de políticas);
                  agente e servidor MCP (planejado)
 tests/contract/  suítes de contrato reutilizáveis por adaptador
 tests/           testes automatizados (unitários + integração com o LLM local)
@@ -452,3 +491,5 @@ Este projeto está sendo desenvolvido com o **Claude Code** como par de programa
 - **Padrões de qualidade definidos por mim:** pedi o lint ampliado (ruff com ~30 famílias, inclusive
   segurança); cada exceção às regras está justificada. Cada commit é verificado isoladamente, não só o
   último do push.
+- **Verificações que pegam o que passaria batido:** a checagem de fatos da curadoria encontrou uma omissão
+  na revisão manual do PDF na primeira execução.

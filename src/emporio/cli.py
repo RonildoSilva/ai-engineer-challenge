@@ -3,6 +3,9 @@
 emporio pipeline run [--stage NOME ...] [--force]   executa o pipeline (incremental)
 emporio pipeline status                            estado de cada etapa
 emporio pipeline graph                             DAG em Mermaid
+emporio policies list                              seções do manual publicadas
+emporio policies search "pergunta" [-k N]          seções mais relevantes para a pergunta
+emporio policies lock                              registra a versão do PDF após revisar a curadoria
 """
 
 from __future__ import annotations
@@ -13,6 +16,8 @@ import sys
 from pydantic import ValidationError
 
 from emporio.config import Settings
+from emporio.data import policies as pol
+from emporio.domain.policies import PolicyStore
 from emporio.log import configure_logging, get_logger
 from emporio.pipeline.core import PipelineError
 from emporio.pipeline.stages import build_pipeline
@@ -43,6 +48,15 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--force", action="store_true", help="reexecuta mesmo se estiver em dia")
     pipe.add_parser("status", help="estado de cada etapa")
     pipe.add_parser("graph", help="imprime o DAG em Mermaid")
+
+    policies = sub.add_parser("policies", help="manual de políticas").add_subparsers(
+        dest="action", required=True
+    )
+    policies.add_parser("list", help="seções publicadas")
+    search = policies.add_parser("search", help="seções mais relevantes para uma pergunta")
+    search.add_argument("query")
+    search.add_argument("-k", type=int, default=3, help="máximo de seções")
+    policies.add_parser("lock", help="registra o hash das seções do PDF após revisar a curadoria")
     return p
 
 
@@ -66,6 +80,29 @@ def _pipeline_cmd(args: argparse.Namespace, settings: Settings) -> int:
     return 0 if report.ok else 1
 
 
+def _policies_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    if args.action == "lock":
+        pdf = settings.raw_dir / "politicas_da_loja.pdf"
+        lock = pol.make_lock(pdf, pol.extract_sections(pdf))
+        path = pol.write_lock(settings.policies_curated_dir, lock)
+        print(f"✔ versão do PDF registrada em {path}")
+        return 0
+
+    store = PolicyStore.from_json(settings.policies_json)
+    if args.action == "list":
+        for s in store.index():
+            refs = ",".join(s.pdf_refs)
+            print(f"{s.id:<20} {s.kind:<9} ~{s.tokens_est:>4} tokens  §{refs:<7} {s.title}")
+        return 0
+
+    hits = store.search(args.query, k=args.k)
+    if not hits:
+        print("(nenhuma seção relevante)")
+    for h in hits:
+        print(f"{h.score:5.1f}  {h.section.id:<20} {', '.join(h.matched)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -79,7 +116,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "pipeline":
             return _pipeline_cmd(args, settings)
-    except PipelineError as e:
+        if args.command == "policies":
+            return _policies_cmd(args, settings)
+    except (PipelineError, pol.PolicyError, FileNotFoundError) as e:
         print(f"✘ {e}", file=sys.stderr)
         return 2
     return 1

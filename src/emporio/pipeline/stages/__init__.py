@@ -11,9 +11,11 @@ from importlib.resources import files
 from pathlib import Path
 
 from emporio.config import Settings
+from emporio.data import policies as policy_data
 from emporio.data import rules, schemas
 from emporio.pipeline.core import Pipeline, Stage
 from emporio.pipeline.stages import tables
+from emporio.pipeline.stages.policies import build_policies, extract_policies
 from emporio.pipeline.stages.raw import snapshot_raw
 
 
@@ -62,6 +64,24 @@ def build_stages(settings: Settings) -> list[Stage]:
             inputs=(settings.store_db,),
             outputs=(processed / "quality_report.json",),
             description="invariantes no banco",
+        ),
+        Stage(
+            name="extract_policies",
+            func=extract_policies,
+            deps=("snapshot_raw",),
+            inputs=(settings.raw_dir / "politicas_da_loja.pdf",),
+            outputs=(processed / "policies_extracted.json", processed / "policies_extracted.md"),
+            code=(policy_data,),
+            description="PDF → seções (layout)",
+        ),
+        Stage(
+            name="build_policies",
+            func=build_policies,
+            deps=("extract_policies",),
+            inputs=(processed / "policies_extracted.json", settings.policies_curated_dir),
+            outputs=(settings.policies_json,),
+            code=(policy_data,),
+            description="curadoria verificada contra o PDF",
         ),
     ]
 
