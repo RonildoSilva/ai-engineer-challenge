@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Setup reprodutível do projeto: verifica pré-requisitos, instala dependências
-# travadas (uv.lock), baixa runtime + modelo baseline com checksum e cria o .env.
+# travadas (uv.lock), baixa runtime + modelo baseline com checksum, cria o .env
+# e executa o pipeline de dados.
 #
 # Uso:  ./scripts/setup.sh            (tudo)
 #       SKIP_MODEL=1 ./scripts/setup.sh   (sem baixar o modelo local)
@@ -50,6 +51,10 @@ if [[ ! -f .env ]]; then
 else
   ok ".env já existe (mantido)"
 fi
+
+# 6. Pipeline de dados (incremental: só refaz etapas cujas entradas ou código mudaram)
+uv run --locked emporio pipeline run
+ok "pipeline de dados em dia (linhagem em data/processed/manifest.json)"
 
 echo
 echo "Pronto. Próximos passos:"
