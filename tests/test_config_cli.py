@@ -67,12 +67,16 @@ def _record(**extra) -> logging.LogRecord:
 
 def test_text_log_includes_extras():
     line = TextFormatter().format(_record(stage="tables", duration_s=0.4))
-    assert "olá" in line and "stage=tables" in line and "duration_s=0.4" in line
+    assert "olá" in line
+    assert "stage=tables" in line
+    assert "duration_s=0.4" in line
 
 
 def test_json_log_is_one_valid_object():
     payload = json.loads(JsonFormatter().format(_record(stage="tables")))
-    assert payload["msg"] == "olá" and payload["stage"] == "tables" and payload["level"] == "INFO"
+    assert payload["msg"] == "olá"
+    assert payload["stage"] == "tables"
+    assert payload["level"] == "INFO"
 
 
 # ------------------------------------------------------------------------ pipeline do projeto
@@ -93,7 +97,8 @@ def test_project_pipeline_snapshot(isolated):
     report = build_pipeline(settings()).run()
     assert report.ok
     snap = json.loads((processed / "raw_snapshot.json").read_text())
-    assert snap["products.csv"]["rows"] == 65 and snap["orders.csv"]["rows"] == 20
+    assert snap["products.csv"]["rows"] == 65
+    assert snap["orders.csv"]["rows"] == 20
     assert snap["products.csv"]["columns"][0] == "product_id"
     assert len(snap["politicas_da_loja.pdf"]["sha256"]) == 64
 
@@ -102,7 +107,8 @@ def test_snapshot_fails_on_missing_source(isolated):
     raw, _ = isolated
     (raw / "orders.csv").unlink()
     result = build_pipeline(settings()).run().by_name()["snapshot_raw"]
-    assert result.status == "failed" and "orders.csv" in (result.error or "")
+    assert result.status == "failed"
+    assert "orders.csv" in (result.error or "")
 
 
 # ------------------------------------------------------------------------ CLI
@@ -133,5 +139,8 @@ def test_console_script_installed():
     exe = ROOT / ".venv/bin/emporio"
     if not exe.exists():
         pytest.skip("venv local não encontrado")
-    result = subprocess.run([str(exe), "pipeline", "graph"], capture_output=True, text=True)
-    assert result.returncode == 0 and "snapshot_raw" in result.stdout
+    result = subprocess.run(
+        [str(exe), "pipeline", "graph"], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0
+    assert "snapshot_raw" in result.stdout

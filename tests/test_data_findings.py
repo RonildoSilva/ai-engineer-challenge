@@ -28,6 +28,7 @@ def test_explore_script_runs():
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert "marca do nome ≠ marca da descrição (7)" in result.stdout
@@ -85,7 +86,8 @@ def test_active_promotions(d):
 
 def test_takamine_gd20_has_no_active_promotion(d):
     p = d["products"].set_index("product_id")
-    assert p.loc[95, "name"].startswith("Takamine GD20") and p.loc[95, "price_brl"] == 2199
+    assert p.loc[95, "name"].startswith("Takamine GD20")
+    assert p.loc[95, "price_brl"] == 2199
     promos = d["promotions"].query("product_id == 95")
     assert not promos["is_active"].any()
 
@@ -102,7 +104,8 @@ def test_orders_period_and_tracking(d):
     o = d["orders"]
     assert (o["order_date"].min(), o["order_date"].max()) == ("2025-10-15", "2026-03-22")
     codes = o["tracking_code"].dropna()
-    assert len(codes) == 8 and codes.str.fullmatch(r"BR[A-Z0-9]{9}BR").all()
+    assert len(codes) == 8
+    assert codes.str.fullmatch(r"BR[A-Z0-9]{9}BR").all()
     shipped = o["status"].isin(["shipped", "delivered"])
     assert o.loc[shipped, "tracking_code"].notna().all()
     assert o.loc[~shipped, "tracking_code"].isna().all()

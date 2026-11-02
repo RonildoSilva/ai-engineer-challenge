@@ -50,6 +50,71 @@ markers = ["integration: sobe o LLM local real (lento, requer artefatos baixados
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.format]
+docstring-code-format = true
+line-ending = "lf"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+# Conjunto amplo: correção, segurança, modernização, simplificação e estilo de docstring.
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "UP",       # pyupgrade
+    "B",        # bugbear
+    "S",        # bandit (segurança)
+    "N",        # nomes (pep8-naming)
+    "PL",       # pylint
+    "SIM",      # simplificações
+    "C4",       # comprehensions
+    "RUF",      # regras do ruff
+    "PT",       # pytest
+    "PTH",      # pathlib em vez de os.path
+    "ARG",      # argumentos não usados
+    "BLE",      # except Exception genérico
+    "TRY",      # boas práticas de exceções
+    "RET",      # retornos
+    "PIE", "PERF", "FURB",
+    "DTZ",      # datetime sem fuso
+    "LOG", "G", # logging
+    "ERA",      # código comentado
+    "ISC",      # concatenação implícita de strings
+    "TID",      # imports
+    "T10",      # debugger esquecido
+    "FBT",      # booleanos posicionais
+    "D",        # docstrings (estilo; presença não é obrigatória, ver ignore)
+]
+ignore = [
+    "D1",       # docstring obrigatória em tudo: preferimos docstrings onde agregam valor
+    "D401",     # "imperative mood" assume inglês; as docstrings são em português
+    "TRY003",   # mensagens de erro descritivas em PT-BR são intencionais
+    "PLR0913",  # funções de domínio com vários filtros opcionais (keyword-only)
+    "ISC001",   # conflita com o formatter
+]
+# Caracteres tipográficos usados de propósito nos textos em português.
+allowed-confusables = ["×", "–", "—", "→", "‐"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["emporio", "tests"]
+
+[tool.ruff.lint.flake8-pytest-style]
+fixture-parentheses = false
+mark-parentheses = false
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101",     # assert é o mecanismo do pytest
+    "PLR2004",  # valores esperados literais deixam o teste legível
+    "S603", "S607", "S310",  # testes executam scripts/subprocessos e chamam o servidor local
+    "PLC0415",  # imports locais isolam dependências em testes específicos
+    "ARG001", "ARG002",  # fixtures usadas pelo efeito colateral
+]
+"scripts/**" = [
+    "T20",      # scripts imprimem resultados no terminal
+    "PLR2004",
+]

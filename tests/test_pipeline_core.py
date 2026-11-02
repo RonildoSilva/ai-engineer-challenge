@@ -101,7 +101,8 @@ def test_first_run_executes_all_in_order(tree):
     make, *_ = tree
     report = make().run()
     assert report.ok
-    assert set(CALLS) == {"a", "b", "c", "d", "e"} and CALLS.index("a") < CALLS.index("d")
+    assert set(CALLS) == {"a", "b", "c", "d", "e"}
+    assert CALLS.index("a") < CALLS.index("d")
 
 
 def test_second_run_is_noop(tree):
@@ -179,17 +180,21 @@ def test_targets_run_only_upstream(tree):
 
 
 def test_failure_skips_dependents_but_runs_independents(tree):
-    make, src, out, tmp = tree
+    make, _src, out, tmp = tree
     p = make(b=Stage("b", _boom, deps=("a",), inputs=(out / "a",), outputs=(out / "b",)))
     report = p.run()
     st = report.by_name()
     assert not report.ok
-    assert st["b"].status == "failed" and "falha proposital" in (st["b"].error or "")
-    assert st["d"].status == "skipped" and "b" in (st["d"].error or "")
-    assert st["c"].status == "ok" and st["e"].status == "ok"
+    assert st["b"].status == "failed"
+    assert "falha proposital" in (st["b"].error or "")
+    assert st["d"].status == "skipped"
+    assert "b" in (st["d"].error or "")
+    assert st["c"].status == "ok"
+    assert st["e"].status == "ok"
     assert "d" not in CALLS
     state = json.loads((tmp / "manifest.json").read_text())["stages"]
-    assert state["b"]["status"] == "failed" and state["b"]["fingerprint"] is None
+    assert state["b"]["status"] == "failed"
+    assert state["b"]["fingerprint"] is None
 
 
 def test_failed_stage_reruns_next_time(tree):
@@ -219,9 +224,12 @@ def test_lineage_manifest(tree):
     make().run()
     state = json.loads((tree[3] / "manifest.json").read_text())
     a = state["stages"]["a"]
-    assert a["status"] == "ok" and len(a["fingerprint"]) == 64
-    assert a["inputs"] == {"src.txt": a["inputs"]["src.txt"]} and a["outputs"]["out/a"]
-    assert a["metrics"] == {"bytes": 2} and "updated_at" in state
+    assert a["status"] == "ok"
+    assert len(a["fingerprint"]) == 64
+    assert a["inputs"] == {"src.txt": a["inputs"]["src.txt"]}
+    assert a["outputs"]["out/a"]
+    assert a["metrics"] == {"bytes": 2}
+    assert "updated_at" in state
 
 
 def test_status_lifecycle(tree):
@@ -236,4 +244,6 @@ def test_status_lifecycle(tree):
 def test_mermaid_graph(tree):
     make, *_ = tree
     g = make().mermaid()
-    assert g.startswith("flowchart LR") and "a --> b" in g and "c --> d" in g
+    assert g.startswith("flowchart LR")
+    assert "a --> b" in g
+    assert "c --> d" in g

@@ -18,7 +18,7 @@ SCRIPTS = ROOT / "scripts"
 
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, **kw)
+    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, check=False, **kw)
 
 
 def manifest_rows() -> list[list[str]]:
@@ -64,7 +64,8 @@ def test_manifest_row_is_pinned(row):
     assert len(row) == 4, "id, destino, url, sha256"
     _id, dest, url, sha = row
     assert re.fullmatch(r"[0-9a-f]{64}", sha), "SHA-256 inválido"
-    assert dest.startswith("models/") and not dest.startswith("models/manifest")
+    assert dest.startswith("models/")
+    assert not dest.startswith("models/manifest")
     assert url.startswith("https://")
     # URL fixada: release com tag de versão ou commit de 40 hex (nunca 'main'/'latest')
     assert re.search(r"/download/\d+\.\d+\.\d+/|/resolve/[0-9a-f]{40}/", url), url
@@ -123,14 +124,16 @@ def test_download_ok_and_idempotent(fake_artifact):
     assert first.returncode == 0, first.stderr
     assert dest.read_bytes() == b"conteudo de teste"
     second = download(m)
-    assert second.returncode == 0 and "já presente e íntegro" in second.stdout
+    assert second.returncode == 0
+    assert "já presente e íntegro" in second.stdout
 
 
 def test_download_rejects_bad_checksum(fake_artifact):
     dest, manifest = fake_artifact
     result = download(manifest("0" * 64))
     assert result.returncode == 3
-    assert not dest.exists() and not dest.with_suffix(".bin.part").exists()
+    assert not dest.exists()
+    assert not dest.with_suffix(".bin.part").exists()
 
 
 def test_download_refuses_corrupted_existing_file(fake_artifact):
@@ -138,7 +141,8 @@ def test_download_refuses_corrupted_existing_file(fake_artifact):
     dest.parent.mkdir(parents=True)
     dest.write_bytes(b"corrompido")
     result = download(manifest())
-    assert result.returncode == 2 and "FORCE=1" in result.stderr
+    assert result.returncode == 2
+    assert "FORCE=1" in result.stderr
     assert download(manifest(), FORCE="1").returncode == 0
     assert dest.read_bytes() == b"conteudo de teste"
 

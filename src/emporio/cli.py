@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from emporio.config import Settings
 from emporio.log import configure_logging, get_logger
 from emporio.pipeline.core import PipelineError
+from emporio.pipeline.stages import build_pipeline
 
 log = get_logger(__name__)
 
@@ -46,8 +47,6 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _pipeline_cmd(args: argparse.Namespace, settings: Settings) -> int:
-    from emporio.pipeline.stages import build_pipeline
-
     pipeline = build_pipeline(settings)
     if args.action == "graph":
         print(pipeline.mermaid())
