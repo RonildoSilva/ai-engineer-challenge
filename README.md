@@ -268,20 +268,26 @@ Detalhes e como adicionar modelos: [`models/README.md`](models/README.md).
 
 ## Tratamento de dados e suposições
 
-*(Será detalhado em `docs/data_report.md`.)* Principais pontos já identificados:
-- Produtos 135–144 com **nome e descrição divergentes**; o nome é tratado como fonte da verdade.
-- Status conflitantes: 96 (ativo, estoque 0), 136 (descontinuado, estoque 13), 130 (*coming soon*, mas já vendido).
-- Totais dos pedidos 3 e 20 não batem com a soma dos itens; vale o `total_brl` informado.
-- Manual com dois telefones e regras de parcelamento contraditórias; a regra mais específica prevalece.
-- Não há data real de entrega: `estimated_delivery` é usada como proxy. `REFERENCE_DATE` (default
-  `2026-03-25`) define o "hoje" das regras de prazo.
-- Consulta de pedido exige número + e-mail/telefone (LGPD).
+Relatório completo, com modelo ER, gráficos e uma decisão para cada achado:
+[`docs/data_report.md`](docs/data_report.md). Todos os números são recalculados por
+`uv run python scripts/explore_data.py` e conferidos por testes (`tests/test_data_findings.py`).
+
+| Achado | Decisão |
+|---|---|
+| 7 produtos com **nome e descrição de marcas diferentes** (135, 136, 137, 139, 140, 142, 144) | O nome é a fonte da verdade; a descrição desses itens não é usada |
+| Status × estoque conflitantes: 96 (ativo, estoque 0), 136 (descontinuado, estoque 13), 130 (*coming soon*, já vendido) | O status prevalece; só `active` com estoque > 0 é vendável |
+| Categorias de sopros e cordas orquestrais **sem nenhum produto** | O agente informa com transparência; nunca inventa produto |
+| Promoções **sem datas**, só `is_active` (4 ativas) | `is_active` é a vigência; o PIX não se soma à promoção (manual §6.2) |
+| Totais dos pedidos 3 e 20 ≠ soma dos itens | Vale o `total_brl` (valor cobrado) |
+| Não há data real de entrega; os dados vão até mar/2026 | `estimated_delivery` como proxy; `REFERENCE_DATE=2026-03-25` define o "hoje" |
+| E-mail duplicado (clientes 11 e 43) | Verificação por **pedido + e-mail/telefone do titular daquele pedido** (LGPD) |
+| PDF: 2 telefones, e-mail com e sem acento, regras de parcelamento contraditórias; extração com ~1 palavra por linha | Regra mais específica prevalece; PDF → markdown normalizado e revisado à mão |
 
 ## Roadmap
 
 ```mermaid
 flowchart LR
-    C1[1 · estrutura +<br/>setup reprodutível]:::done --> C1b[1b · testes +<br/>CI do setup]:::wip --> C2[2 · relatório<br/>de dados] --> C3[3 · dados<br/>SQLite] --> C4[4 · políticas] --> C5[5-6 · domínio<br/>regras] --> C7[7 · servidor<br/>MCP]
+    C1[1 · estrutura +<br/>setup reprodutível]:::done --> C1b[1b · testes +<br/>CI do setup]:::done --> C2[2 · relatório<br/>de dados]:::wip --> C3[3 · dados<br/>SQLite] --> C4[4 · políticas] --> C5[5-6 · domínio<br/>regras] --> C7[7 · servidor<br/>MCP]
     C7 --> C8[8 · perfis<br/>de LLM] --> C9[9 · agente<br/>host MCP] --> C10[10 · detecção<br/>de assunto] --> C11[11 · CLI +<br/>histórico] --> C12[12 · guardrails] --> C13[13 · eval] --> C14[14 · exemplos] --> C15[15 · README<br/>final]
     classDef wip fill:#fde68a,stroke:#b45309,color:#000
     classDef done fill:#bbf7d0,stroke:#15803d,color:#000
@@ -293,11 +299,12 @@ flowchart LR
 config/          perfis de LLM                                   (planejado)
 data/raw/        CSVs e manual de políticas originais
 data/processed/  artefatos gerados (SQLite, políticas .md) — não versionado
-docs/            relatório de dados, workflow com IA              (planejado)
+docs/            relatório de dados (data_report.md); workflow com IA (planejado)
 evals/           cenários e resultados por modelo                 (planejado)
 examples/        conversas de exemplo                             (planejado)
 models/          manifest.tsv (versionado) + binários (não versionados)
-scripts/         setup, verificação (check.sh), download de modelos, start do llamafile, smoke test
+scripts/         setup, verificação (check.sh), download de modelos, start do llamafile, smoke test,
+                 exploração dos dados (explore_data.py)
 src/emporio/     agente e servidor MCP
 tests/           testes automatizados (unitários + integração com o LLM local)
 .github/         CI (GitHub Actions)
