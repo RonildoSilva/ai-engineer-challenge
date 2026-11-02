@@ -9,20 +9,29 @@ emporio policies lock                              registra a versão do PDF ap�
 emporio search "pergunta" [--kind product|policy] [-k N]   busca híbrida (lexical + embeddings)
 emporio catalog search "violões até R$1000" [--all]        produtos com preço/PIX/promoção
 emporio catalog show "takamine gd20"                       detalhe, ambiguidade e alternativas
+emporio order show 8 --contato email|telefone              pedido (verificação LGPD)
+emporio order return 7 --contato … --motivo "me arrependi" troca/devolução com prazos
+emporio rules pay 599.90 [--promo] [--parcelas 10]         formas de pagamento e parcelamento
+emporio rules ship 349.90 --cidade "Campo Grande"          frete
+emporio rules hours [--at 2026-11-02T10:00]                loja aberta/fechada agora
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime
 
 from pydantic import ValidationError
 
 from emporio.adapters.sqlite_repo import SqliteRepository
 from emporio.config import Settings
 from emporio.data import policies as pol
+from emporio.domain.calculators import check_installments, payment_plan, shipping_quote
 from emporio.domain.catalog import CatalogService, ProductView
+from emporio.domain.orders import OrderService
 from emporio.domain.policies import PolicyStore
+from emporio.domain.store_hours import store_status, weekly_hours
 from emporio.log import configure_logging, get_logger
 from emporio.pipeline.core import PipelineError
 from emporio.pipeline.stages import build_pipeline
@@ -79,6 +88,29 @@ def _parser() -> argparse.ArgumentParser:
     csearch.add_argument("-k", type=int, default=8)
     cshow = catalog.add_parser("show", help="detalhe de um produto (nome aproximado ou id)")
     cshow.add_argument("ref")
+
+    order = sub.add_parser("order", help="pedidos (exige e-mail ou telefone do titular)")
+    order_sub = order.add_subparsers(dest="action", required=True)
+    oshow = order_sub.add_parser("show", help="consulta um pedido")
+    oret = order_sub.add_parser("return", help="avalia troca/devolução")
+    for sp in (oshow, oret):
+        sp.add_argument("order")
+        sp.add_argument("--contato", required=True, help="e-mail ou telefone do titular")
+    oret.add_argument("--motivo", default="", help="ex.: 'me arrependi', 'veio com defeito'")
+
+    rules = sub.add_parser("rules", help="regras da loja").add_subparsers(
+        dest="action", required=True
+    )
+    pay = rules.add_parser("pay", help="formas de pagamento para um valor")
+    pay.add_argument("valor", type=float)
+    pay.add_argument("--promo", action="store_true", help="o preço já é promocional")
+    pay.add_argument("--parcelas", type=int, help="verifica um número de parcelas")
+    ship = rules.add_parser("ship", help="frete para um valor e cidade")
+    ship.add_argument("valor", type=float)
+    ship.add_argument("--cidade", required=True)
+    ship.add_argument("--categoria", type=int)
+    hours = rules.add_parser("hours", help="loja aberta ou fechada")
+    hours.add_argument("--at", help="data/hora ISO (padrão: agora, em Campo Grande)")
     return p
 
 
@@ -204,6 +236,38 @@ def _catalog_cmd(args: argparse.Namespace, settings: Settings) -> int:
     return _with_embeddings(settings, run)
 
 
+def _order_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    svc = OrderService(SqliteRepository(settings.store_db), settings.reference_date)
+    if args.action == "show":
+        r = svc.lookup(args.order, args.contato)
+        print(r.view.describe() if r.view else r.message)
+        return 0 if r.verified else 1
+    a = svc.assess_return(args.order, args.contato, args.motivo)
+    if not a.verified:
+        print(a.message)
+        return 1
+    status = "elegível" if a.eligible else "não elegível"
+    print(f"[{a.reason or 'motivo?'} · {status}] {a.message}")
+    for line in [a.rule, *a.conditions, *a.next_steps]:
+        if line:
+            print(f"  - {line}")
+    return 0
+
+
+def _rules_cmd(args: argparse.Namespace, settings: Settings) -> int:  # noqa: ARG001
+    if args.action == "pay":
+        print(payment_plan(args.valor, has_promotion=args.promo).describe())
+        if args.parcelas:
+            print(check_installments(args.valor, args.parcelas)[1])
+    elif args.action == "ship":
+        print(shipping_quote(args.valor, args.cidade, category_id=args.categoria).describe())
+    else:
+        when = datetime.fromisoformat(args.at) if args.at else None
+        print(store_status(when).describe())
+        print(weekly_hours())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -219,6 +283,8 @@ def main(argv: list[str] | None = None) -> int:
         "policies": _policies_cmd,
         "search": _search_cmd,
         "catalog": _catalog_cmd,
+        "order": _order_cmd,
+        "rules": _rules_cmd,
     }
     try:
         return commands[args.command](args, settings)

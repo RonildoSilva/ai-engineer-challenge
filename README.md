@@ -21,6 +21,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 - [Manual de políticas](#manual-de-políticas)
 - [Busca híbrida](#busca-híbrida)
 - [Catálogo](#catálogo)
+- [Pedidos e regras da loja](#pedidos-e-regras-da-loja)
 - [Camada de dados](#camada-de-dados)
 - [Escalabilidade e robustez](#escalabilidade-e-robustez)
 - [Modelos locais](#modelos-locais)
@@ -203,6 +204,11 @@ uv run emporio policies search "posso devolver?"   # seção mais relevante para
 uv run emporio search "violão pra ligar na caixa de som" [--kind product|policy]   # busca híbrida
 uv run emporio catalog search "Quais violões custando até R$1000?" [--all]   # filtros inferidos + preço
 uv run emporio catalog show "Quanto custa o Takamine GD20?"                  # detalhe / alternativas
+uv run emporio order show 8 --contato "(67) 99654-7821"                      # pedido (verificação LGPD)
+uv run emporio order return 7 --contato leticia.rocha@jmail.com --motivo "veio com defeito"
+uv run emporio rules pay 599.90 --parcelas 10      # PIX, débito, boleto e parcelamento válido
+uv run emporio rules ship 349.90 --cidade "Campo Grande"
+uv run emporio rules hours                         # aberta/fechada agora (fuso de Campo Grande)
 ```
 
 > Chat, servidor MCP e avaliação serão documentados aqui conforme forem implementados.
@@ -223,7 +229,7 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>286 testes, ~20 s, offline]
+        L2 --> L3[pytest unitário<br/>356 testes, ~20 s, offline]
         L3 --> L4[pytest -m integration<br/>5 testes, sobe os modelos reais]
     end
     K -.-> K2
@@ -250,6 +256,7 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Repository | **suíte de contrato** (22, reutilizável para o Postgres) + somente leitura, injeção de SQL, uma conexão por thread (4) | `tests/contract/`, `tests/test_sqlite_repository.py` |
 | Manual de políticas | extração em seções numeradas (listas não viram seção, números não quebram), curadoria completa e em dia com o PDF, **fato ausente / seção do PDF alterada / seção sem curadoria detectados**, decisões aplicadas, busca por assunto (15 perguntas reais + 3 fora de escopo), CLI (38) | `tests/test_policies.py` |
 | Catálogo | preço com promoção × PIX (§6.2), faixa de preço e categoria extraídas do texto, acessórios × "violão de 7 cordas", exemplo do enunciado ("violões até R$1000": 12 opções), preço promocional nos filtros, nome aproximado e pergunta inteira ("Quanto custa o Takamine GD20?"), ambiguidade, alternativas para esgotado/descontinuado/em breve, CLI (62) | `tests/test_catalog.py` |
+| Pedidos e regras | verificação por e-mail ou telefone **do titular** (com/sem DDD, +55) e mensagem neutra em qualquer falha, e-mail duplicado só abre o próprio pedido, pedido atrasado, prazos de arrependimento/defeito/preferência dentro e fora da janela, garantia legal, parcelamento pelas faixas da §3.1, frete metropolitano × outras cidades × frete especial, feriados (Páscoa calculada) e fuso de Campo Grande, CLI (70) | `tests/test_orders_rules.py` |
 | Busca | documentos (descrição suja não entra), índice vetorial, **suíte de contrato do `Retriever`** (lexical e híbrido), fusão RRF, limiar de similaridade, **degradação para lexical** (serviço fora do ar, índice vazio, modelo trocado) e recuperação, cache de vetores, etapa sem modelo, CLI (44) | `tests/test_retrieval.py`, `tests/contract/` |
 | Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo") (5) | `tests/test_llm_integration.py` |
 
@@ -403,6 +410,48 @@ flowchart TD
     DISP -->|sim| OK[preço com promoção/PIX]
 ```
 
+## Pedidos e regras da loja
+
+Tudo calculado em código e testado (`src/emporio/domain/orders.py`, `calculators.py`, `store_hours.py`).
+O LLM recebe a decisão pronta (elegível ou não, até quando, o que fazer em seguida) e só redige a resposta.
+
+**Consulta de pedido (LGPD):** exige o número do pedido **e** o e-mail ou telefone do titular *daquele*
+pedido. Qualquer falha (pedido inexistente, contato de outra pessoa, contato incompleto) devolve a mesma
+mensagem neutra, que não revela se o pedido existe. O cliente com e-mail duplicado na base só abre o próprio
+pedido.
+
+**Troca e devolução** (manual §4 e §8), contadas a partir da `REFERENCE_DATE`:
+
+```mermaid
+flowchart TD
+    A([pedido verificado + motivo]) --> S{status}
+    S -->|cancelado| C[nada a devolver]
+    S -->|pendente, confirmado<br/>ou enviado| N[ainda não entregue:<br/>prazo conta do recebimento]
+    S -->|entregue| M{motivo}
+    M -->|arrependimento| R{até 7 dias do<br/>recebimento?}
+    R -->|sim| R1[devolução: frete por conta da loja,<br/>reembolso em até 10 dias úteis]
+    R -->|não| R2[fora do prazo: perguntar<br/>se há defeito]
+    M -->|defeito| D{até 30 dias<br/>da compra?}
+    D -->|sim| D1[troca por defeito]
+    D -->|não| D2[garantia legal de 90 dias<br/>+ garantia do fabricante]
+    M -->|preferência| P{até 7 dias?}
+    P -->|sim| P1[troca sujeita a estoque]
+    P -->|não| P2[fora do prazo]
+    M -->|não informado| Q[perguntar o motivo]
+```
+
+Com a data de referência padrão (25/03/2026), **nenhum pedido entregue ainda está dentro dos 7 dias de
+arrependimento** (o mais recente foi entregue há 36 dias). Por isso o exemplo "me arrependi, posso
+devolver?" responde "fora do prazo" e já oferece o caminho certo: o pedido 7 passou da troca por defeito,
+mas a **garantia legal vale até 18/05/2026**. Os casos dentro do prazo são testados com outras datas de
+referência. O pedido 8 aparece como **atrasado** (previsão de entrega vencida) e é encaminhado à equipe.
+
+| Regra | Como fica |
+|---|---|
+| Pagamento (§3, §3.1) | PIX com 5% (só sem promoção), débito, boleto; parcelamento até 3x com parcela ≥ R$ 50, 4–6x ≥ R$ 80, 7–12x ≥ R$ 100. R$ 599,90 → até 6x de R$ 99,98; "10x?" é recusado com o motivo. Combinar formas só acima de R$ 2.000 |
+| Frete (§5) | Campo Grande: motoboy, 1 a 3 dias úteis, grátis a partir de R$ 500 (senão R$ 35). Outras cidades: SEDEX, Jadlog e PAC com prazos e valor pelo CEP. Baterias, pianos e contrabaixos acústicos: frete especial |
+| Horário (§2) | Seg–sex 09–18h, sáb 09–13h, domingo e feriados fechado, no fuso de Campo Grande. Feriados nacionais, Sexta-feira Santa (calculada a partir da Páscoa), 11/10 (MS) e 26/08 (Campo Grande). Diz quando a loja abre de novo |
+
 ## Camada de dados
 
 ```mermaid
@@ -540,6 +589,7 @@ Relatório completo, com modelo ER, gráficos e uma decisão para cada achado:
 | Promoções **sem datas**, só `is_active` (4 ativas) | `is_active` é a vigência; o PIX não se soma à promoção (manual §6.2) |
 | Totais dos pedidos 3 e 20 ≠ soma dos itens | Vale o `total_brl` (valor cobrado) |
 | Não há data real de entrega; os dados vão até mar/2026 | `estimated_delivery` como proxy; `REFERENCE_DATE=2026-03-25` define o "hoje" |
+| Regras ambíguas no manual | Exatos R$ 500 → frete grátis (favorece o cliente); até 3x, parcela ≥ R$ 50; troca por preferência conta do recebimento; região metropolitana = Campo Grande (únicos clientes da região na base); Carnaval e Corpus Christi não fecham a loja (pontos facultativos); cancelamento antes da entrega vai para a equipe (o manual não trata) |
 | E-mail duplicado (clientes 11 e 43) | Verificação por **pedido + e-mail/telefone do titular daquele pedido** (LGPD) |
 | PDF: 2 telefones, e-mail com e sem acento, regras de parcelamento contraditórias; extração com ~1 palavra por linha | Regra mais específica prevalece; extração em modo layout + [curadoria versionada e verificada](#manual-de-políticas) |
 
@@ -557,7 +607,7 @@ flowchart TD
     end
     subgraph F3["③ Domínio e API"]
         direction LR
-        C7["7 · catálogo"]:::done --> C8["8 · pedidos<br/>e regras"]:::next --> C9["9 · servidor<br/>MCP"]
+        C7["7 · catálogo"]:::done --> C8["8 · pedidos<br/>e regras"]:::done --> C9["9 · servidor<br/>MCP"]:::next
     end
     subgraph F4["④ Agente"]
         direction LR
@@ -593,7 +643,7 @@ src/emporio/     config.py (configuração validada), log.py (logs estruturados)
                  pipeline/ (orquestrador + etapas), data/ (contratos, regras, schema.sql, policies.py),
                  ports.py (interfaces), adapters/ (SQLite, embedders, índice vetorial, buscas),
                  retrieval/ (documentos, montagem da busca), services.py (servidores locais),
-                 domain/ (modelos, busca de políticas, catálogo);
+                 domain/ (modelos, busca de políticas, catálogo, pedidos, pagamento/frete, horário);
                  agente e servidor MCP (planejado)
 tests/contract/  suítes de contrato reutilizáveis por adaptador
 tests/           testes automatizados (unitários + integração com o LLM local)
@@ -608,6 +658,10 @@ tests/           testes automatizados (unitários + integração com o LLM local
   e a pergunta fora de escopo mais parecida, 0,292 (limiar 0,30). Ele é um filtro auxiliar; a defesa principal
   contra perguntas fora de escopo será a detecção de assunto e os guardrails.
 - Indexar os 75 documentos em CPU leva ~1 minuto na primeira vez (depois, só o que muda é recalculado).
+- O valor do frete para outras cidades não é calculado (depende de CEP, peso, dimensões e APIs das
+  transportadoras); o agente informa os prazos e que o valor sai no fechamento.
+- A verificação de identidade aceita o telefone sem DDD (8+ dígitos finais): é prática para o cliente, mas
+  mais fraca que um código por SMS/e-mail (OTP), que seria o próximo passo em produção.
 - *(Lista completa e "o que faria com mais tempo" ao final do projeto.)*
 
 ## Uso de assistentes de código
@@ -636,6 +690,9 @@ Este projeto está sendo desenvolvido com o **Claude Code** como par de programa
   por causa de stopwords; a fusão quebrava se um resultado lexical não estivesse no índice vetorial; a
   suíte passou de 10 s para 118 s porque uma fixture de sessão subia o modelo real (corrigido para 12 s); e
   a porta 8081 desta máquina estava ocupada por outro serviço, o que levou à troca automática de porta.
+- **Olhar os dados antes de prometer o exemplo:** ao preparar as regras de devolução, o levantamento mostrou
+  que nenhum pedido está na janela de arrependimento com a data de referência; o README e os exemplos
+  assumem isso em vez de forçar um caso que os dados não sustentam.
 - **Testar com a pergunta real, não com a ideal:** no catálogo, "Quanto custa o Takamine GD20?" (a pergunta
   do enunciado) saía ambígua, porque "quanto custa o" diluía o nome; e "quanto custa um violão?" virava três
   produtos aleatórios. Ambos corrigidos, com testes.
