@@ -7,6 +7,8 @@ emporio policies list                              seções do manual publicadas
 emporio policies search "pergunta" [-k N]          seções mais relevantes para a pergunta
 emporio policies lock                              registra a versão do PDF após revisar a curadoria
 emporio search "pergunta" [--kind product|policy] [-k N]   busca híbrida (lexical + embeddings)
+emporio catalog search "violões até R$1000" [--all]        produtos com preço/PIX/promoção
+emporio catalog show "takamine gd20"                       detalhe, ambiguidade e alternativas
 """
 
 from __future__ import annotations
@@ -16,8 +18,10 @@ import sys
 
 from pydantic import ValidationError
 
+from emporio.adapters.sqlite_repo import SqliteRepository
 from emporio.config import Settings
 from emporio.data import policies as pol
+from emporio.domain.catalog import CatalogService, ProductView
 from emporio.domain.policies import PolicyStore
 from emporio.log import configure_logging, get_logger
 from emporio.pipeline.core import PipelineError
@@ -65,6 +69,16 @@ def _parser() -> argparse.ArgumentParser:
     search_all.add_argument("query")
     search_all.add_argument("--kind", choices=["product", "policy"])
     search_all.add_argument("-k", type=int, default=5, help="máximo de resultados")
+
+    catalog = sub.add_parser("catalog", help="catálogo de produtos").add_subparsers(
+        dest="action", required=True
+    )
+    csearch = catalog.add_parser("search", help="busca com filtros inferidos do texto")
+    csearch.add_argument("query")
+    csearch.add_argument("--all", action="store_true", help="inclui indisponíveis")
+    csearch.add_argument("-k", type=int, default=8)
+    cshow = catalog.add_parser("show", help="detalhe de um produto (nome aproximado ou id)")
+    cshow.add_argument("ref")
     return p
 
 
@@ -140,6 +154,56 @@ def _search_cmd(args: argparse.Namespace, settings: Settings) -> int:
         return run_search()
 
 
+def _with_embeddings(settings: Settings, fn):
+    """Executa `fn(embedding_url)` com o servidor de embeddings disponível (ou degradado)."""
+    if settings.embedding_backend != "llamafile":
+        return fn(None)
+    try:
+        with ensure_server(
+            "embedding",
+            settings.embedding_base_url,
+            settings.path(settings.embedding_model_file),
+            log_dir=settings.processed_dir / "logs",
+        ) as url:
+            return fn(url)
+    except ServerUnavailableError as e:
+        print(f"⚠ {e} — usando só a busca lexical", file=sys.stderr)
+        return fn(None)
+
+
+def _fmt_view(v: ProductView) -> str:
+    p = v.product
+    flag = "" if p.is_sellable else f" [{p.availability}]"
+    return f"{p.product_id:>4}  {p.name}{flag} — {v.price.describe()}"
+
+
+def _catalog_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    def run(url: str | None) -> int:
+        svc = CatalogService(SqliteRepository(settings.store_db), build_retriever(settings, url))
+        if args.action == "search":
+            r = svc.search(args.query, only_available=not args.all, limit=args.k)
+            filters = {k: v for k, v in r.filters.items() if v not in (None, False)}
+            print(f"[{r.scope}] filtros: {filters}")
+            for v in r.items:
+                print(_fmt_view(v))
+            if r.note:
+                print(f"nota: {r.note}")
+            return 0
+        d = svc.detail(args.ref)
+        print(f"[{d.status}]")
+        if d.product:
+            print(_fmt_view(d.product))
+        for c in d.candidates:
+            print("  candidato:", _fmt_view(c))
+        for a in d.alternatives:
+            print("  alternativa:", _fmt_view(a))
+        if d.note:
+            print(f"nota: {d.note}")
+        return 0
+
+    return _with_embeddings(settings, run)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -150,17 +214,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {'.'.join(map(str, err['loc']))}: {err['msg']}", file=sys.stderr)
         return 2
     configure_logging(settings.log_level, settings.log_format)
+    commands = {
+        "pipeline": _pipeline_cmd,
+        "policies": _policies_cmd,
+        "search": _search_cmd,
+        "catalog": _catalog_cmd,
+    }
     try:
-        if args.command == "pipeline":
-            return _pipeline_cmd(args, settings)
-        if args.command == "policies":
-            return _policies_cmd(args, settings)
-        if args.command == "search":
-            return _search_cmd(args, settings)
+        return commands[args.command](args, settings)
     except (PipelineError, pol.PolicyError, FileNotFoundError) as e:
         print(f"✘ {e}", file=sys.stderr)
         return 2
-    return 1
 
 
 if __name__ == "__main__":

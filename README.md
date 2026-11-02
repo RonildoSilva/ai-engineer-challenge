@@ -20,6 +20,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 - [Pipeline de dados](#pipeline-de-dados)
 - [Manual de políticas](#manual-de-políticas)
 - [Busca híbrida](#busca-híbrida)
+- [Catálogo](#catálogo)
 - [Camada de dados](#camada-de-dados)
 - [Escalabilidade e robustez](#escalabilidade-e-robustez)
 - [Modelos locais](#modelos-locais)
@@ -200,6 +201,8 @@ uv run emporio pipeline graph          # DAG em Mermaid
 uv run emporio policies list           # seções do manual de políticas publicadas
 uv run emporio policies search "posso devolver?"   # seção mais relevante para a pergunta
 uv run emporio search "violão pra ligar na caixa de som" [--kind product|policy]   # busca híbrida
+uv run emporio catalog search "Quais violões custando até R$1000?" [--all]   # filtros inferidos + preço
+uv run emporio catalog show "Quanto custa o Takamine GD20?"                  # detalhe / alternativas
 ```
 
 > Chat, servidor MCP e avaliação serão documentados aqui conforme forem implementados.
@@ -220,7 +223,7 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>224 testes, ~15 s, offline]
+        L2 --> L3[pytest unitário<br/>286 testes, ~20 s, offline]
         L3 --> L4[pytest -m integration<br/>5 testes, sobe os modelos reais]
     end
     K -.-> K2
@@ -246,6 +249,7 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Camada de dados | regras de tratamento, 7 tipos de linha inválida reportados com `arquivo:linha campo`, integridade referencial, **7 violações barradas pelos `CHECK`s do banco**, banco anterior intacto quando a validação falha, mudança de regra refaz o `transform` (41) | `tests/test_data_layer.py` |
 | Repository | **suíte de contrato** (22, reutilizável para o Postgres) + somente leitura, injeção de SQL, uma conexão por thread (4) | `tests/contract/`, `tests/test_sqlite_repository.py` |
 | Manual de políticas | extração em seções numeradas (listas não viram seção, números não quebram), curadoria completa e em dia com o PDF, **fato ausente / seção do PDF alterada / seção sem curadoria detectados**, decisões aplicadas, busca por assunto (15 perguntas reais + 3 fora de escopo), CLI (38) | `tests/test_policies.py` |
+| Catálogo | preço com promoção × PIX (§6.2), faixa de preço e categoria extraídas do texto, acessórios × "violão de 7 cordas", exemplo do enunciado ("violões até R$1000": 12 opções), preço promocional nos filtros, nome aproximado e pergunta inteira ("Quanto custa o Takamine GD20?"), ambiguidade, alternativas para esgotado/descontinuado/em breve, CLI (62) | `tests/test_catalog.py` |
 | Busca | documentos (descrição suja não entra), índice vetorial, **suíte de contrato do `Retriever`** (lexical e híbrido), fusão RRF, limiar de similaridade, **degradação para lexical** (serviço fora do ar, índice vazio, modelo trocado) e recuperação, cache de vetores, etapa sem modelo, CLI (44) | `tests/test_retrieval.py`, `tests/contract/` |
 | Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo") (5) | `tests/test_llm_integration.py` |
 
@@ -359,6 +363,45 @@ flowchart LR
 - **Limiar calibrado** com o modelo real: resultados vetoriais com similaridade abaixo de 0,30 não contam
   (ver limitações).
 - `uv run emporio search "pergunta"` sobe o servidor de embeddings se preciso e o encerra ao final.
+
+## Catálogo
+
+`CatalogService` (`src/emporio/domain/catalog.py`) concentra as regras do catálogo. O LLM nunca calcula preço
+nem decide disponibilidade: recebe o resultado pronto, com uma nota de orientação quando é preciso.
+
+| Regra | Origem | Como fica |
+|---|---|---|
+| Preço promocional sempre com o original e o percentual | manual §6.2 | `R$ 5.519,08 na promoção Desconto Exclusivo (8% de desconto sobre R$ 5.999,00)` |
+| PIX com 5% de desconto, **mas não sobre promoção** | §3 e §6.2 | GD20 (promoção inativa): `R$ 2.199,00 (ou R$ 2.089,05 no PIX)`; produto em promoção: sem PIX |
+| Filtros pelo preço efetivo | §6.2 | Ohana CK-20 (R$ 549 com 20%) aparece em "ukulele até 450" |
+| Esgotado, descontinuado ou em breve → informar e sugerir alternativas | §7.3 | Até 3 disponíveis da mesma categoria, priorizando o mesmo tipo ("Dreadnought", "7 Cordas") e preço próximo |
+| A loja não vende acessórios | §1 e §7.1 | "vocês vendem cordas?", "corda de violão", "amplificador pra guitarra" → redirecionar; "violão de **7 cordas**" continua busca de instrumento |
+| Categorias sem produto | relatório de dados | "tem flauta?", "quero um violino" → informar com transparência |
+
+**Pensado para um LLM pequeno**, que pode mandar a pergunta inteira em vez de preencher os parâmetros:
+- **Filtros inferidos do texto:** "Quais opções de violões disponíveis custando até R$1000?" vira categoria
+  Violões + até R$ 1.000 (12 opções, ordenadas por preço). "entre 5 mil e 8.000" também é entendido.
+- **Nome aproximado:** "Quanto custa o Takamine GD20?", "takamine gd 20" e "TAKAMINE GD-20" encontram o
+  mesmo produto. As palavras de pedido ("quanto custa o…") são descartadas antes da comparação.
+- **Ambiguidade explícita:** "takamine" e "martin d28" devolvem os candidatos e a orientação de perguntar
+  qual. "Quanto custa um violão?" (categoria, não modelo) orienta a usar a busca.
+
+```mermaid
+flowchart TD
+    Q([nome, id ou pergunta]) --> ID{id?}
+    ID -->|sim| F[encontrado]
+    ID -->|não| AC{acessório?}
+    AC -->|sim| X[acessório: redirecionar]
+    AC -->|não| CAT{só cita categoria?}
+    CAT -->|sim| S[orientar busca por categoria]
+    CAT -->|não| FZ[similaridade com os nomes<br/>sem palavras de pedido]
+    FZ -->|claro vencedor ou<br/>único candidato próximo| F
+    FZ -->|vários próximos| AMB[ambíguo: até 3 candidatos]
+    FZ -->|nada próximo| NF[não encontrado: não inventar]
+    F --> DISP{vendável?}
+    DISP -->|não| ALT[nota + alternativas]
+    DISP -->|sim| OK[preço com promoção/PIX]
+```
 
 ## Camada de dados
 
@@ -505,8 +548,8 @@ Relatório completo, com modelo ER, gráficos e uma decisão para cada achado:
 ```mermaid
 flowchart LR
     C1[1 · estrutura +<br/>setup]:::done --> C1b[1b · testes + CI]:::done --> C2[2 · relatório<br/>de dados]:::done --> C3[3 · pipeline +<br/>config + CLI]:::done
-    C3 --> C4[4 · dados<br/>SQLite]:::done --> C4b[4b · lint<br/>ampliado]:::done --> C5[5 · políticas]:::done --> C6a[6a · avaliação e<br/>modelo de embeddings]:::done --> C6[6b · busca híbrida]:::done --> C7[7-8 · domínio]:::next
-    C7 --> C9[9 · servidor MCP] --> C10[10 · perfis LLM] --> C11[11 · agente] --> C12[12 · detecção<br/>de assunto] --> C13[13 · chat +<br/>histórico]
+    C3 --> C4[4 · dados<br/>SQLite]:::done --> C4b[4b · lint<br/>ampliado]:::done --> C5[5 · políticas]:::done --> C6a[6a · avaliação e<br/>modelo de embeddings]:::done --> C6[6b · busca híbrida]:::done --> C7[7 · catálogo]:::done --> C8[8 · pedidos e<br/>regras]:::next
+    C8 --> C9[9 · servidor MCP] --> C10[10 · perfis LLM] --> C11[11 · agente] --> C12[12 · detecção<br/>de assunto] --> C13[13 · chat +<br/>histórico]
     C13 --> C14[14 · guardrails] --> C15[15 · eval] --> C16[16 · escala<br/>Postgres/pgvector] --> C17[17 · exemplos] --> CX[19-21 · Airflow,<br/>REST, UI] --> C18[README final]
     classDef next fill:#fde68a,stroke:#b45309,color:#000
     classDef done fill:#bbf7d0,stroke:#15803d,color:#000
@@ -532,7 +575,7 @@ src/emporio/     config.py (configuração validada), log.py (logs estruturados)
                  pipeline/ (orquestrador + etapas), data/ (contratos, regras, schema.sql, policies.py),
                  ports.py (interfaces), adapters/ (SQLite, embedders, índice vetorial, buscas),
                  retrieval/ (documentos, montagem da busca), services.py (servidores locais),
-                 domain/ (modelos, busca de políticas);
+                 domain/ (modelos, busca de políticas, catálogo);
                  agente e servidor MCP (planejado)
 tests/contract/  suítes de contrato reutilizáveis por adaptador
 tests/           testes automatizados (unitários + integração com o LLM local)
@@ -575,6 +618,9 @@ Este projeto está sendo desenvolvido com o **Claude Code** como par de programa
   por causa de stopwords; a fusão quebrava se um resultado lexical não estivesse no índice vetorial; a
   suíte passou de 10 s para 118 s porque uma fixture de sessão subia o modelo real (corrigido para 12 s); e
   a porta 8081 desta máquina estava ocupada por outro serviço, o que levou à troca automática de porta.
+- **Testar com a pergunta real, não com a ideal:** no catálogo, "Quanto custa o Takamine GD20?" (a pergunta
+  do enunciado) saía ambígua, porque "quanto custa o" diluía o nome; e "quanto custa um violão?" virava três
+  produtos aleatórios. Ambos corrigidos, com testes.
 - **Medir antes de escolher, e corrigir o que foi publicado:** o modelo de embeddings foi escolhido por
   avaliação com gabarito, não por reputação. A investigação de uma queda revelou que o runtime usava a GPU
   integrada sem avisar, e que medições já publicadas como "sem GPU" estavam erradas; o README foi corrigido
