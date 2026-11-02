@@ -76,3 +76,27 @@ class Customer:
     email: str
     city: str
     is_metro: bool
+
+
+# ------------------------------------------------------------------------------ busca
+
+
+@dataclass(frozen=True)
+class Document:
+    """Unidade de busca: um produto ou uma seção do manual de políticas."""
+
+    id: str  # "p95" para produtos; id da seção para políticas
+    kind: str  # product | policy
+    title: str
+    text: str  # texto completo, usado pelos embeddings
+    lexical_text: str  # texto normalizado, usado pela busca lexical
+
+
+@dataclass(frozen=True)
+class SearchHit:
+    doc_id: str
+    kind: str
+    title: str
+    score: float
+    # posição (1 = primeiro) em cada busca que encontrou o documento: {"lexical": 2, "vector": 1}
+    ranks: dict[str, int] = field(default_factory=dict)

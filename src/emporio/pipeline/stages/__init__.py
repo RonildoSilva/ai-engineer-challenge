@@ -10,13 +10,16 @@ from __future__ import annotations
 from importlib.resources import files
 from pathlib import Path
 
+from emporio.adapters import embedders, vector_sqlite
 from emporio.config import Settings
 from emporio.data import policies as policy_data
 from emporio.data import rules, schemas
 from emporio.pipeline.core import Pipeline, Stage
 from emporio.pipeline.stages import tables
+from emporio.pipeline.stages.embeddings import embed_index
 from emporio.pipeline.stages.policies import build_policies, extract_policies
 from emporio.pipeline.stages.raw import snapshot_raw
+from emporio.retrieval import documents
 
 
 def build_stages(settings: Settings) -> list[Stage]:
@@ -82,6 +85,29 @@ def build_stages(settings: Settings) -> list[Stage]:
             outputs=(settings.policies_json,),
             code=(policy_data,),
             description="curadoria verificada contra o PDF",
+        ),
+        Stage(
+            name="embed_index",
+            func=embed_index,
+            deps=("load", "build_policies"),
+            # o arquivo do modelo é entrada: se ele for baixado depois, o índice é refeito
+            inputs=(
+                settings.store_db,
+                settings.policies_json,
+                settings.path(settings.embedding_model_file),
+            ),
+            outputs=(settings.vectors_db,),
+            code=(documents, embedders, vector_sqlite),
+            version="|".join(
+                [
+                    "1",
+                    settings.embedding_backend,
+                    settings.embedding_model,
+                    settings.embedding_query_format,
+                    settings.embedding_doc_format,
+                ]
+            ),
+            description="vetores dos documentos (cache por texto)",
         ),
     ]
 

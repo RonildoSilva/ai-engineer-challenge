@@ -85,12 +85,21 @@ class RunReport:
 # ------------------------------------------------------------------------------ hashing
 
 
+# Cache por (caminho, tamanho, mtime): arquivos grandes (ex.: modelo de 334 MB como entrada de
+# uma etapa) são lidos no máximo uma vez por processo; qualquer alteração muda a chave.
+_HASH_CACHE: dict[tuple[str, int, int], str] = {}
+
+
 def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    st = path.stat()
+    key = (str(path.resolve()), st.st_size, st.st_mtime_ns)
+    if key not in _HASH_CACHE:
+        h = hashlib.sha256()
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        _HASH_CACHE[key] = h.hexdigest()
+    return _HASH_CACHE[key]
 
 
 def hash_paths(paths: Iterable[Path], root: Path) -> dict[str, str | None]:

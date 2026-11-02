@@ -6,6 +6,7 @@ emporio pipeline graph                             DAG em Mermaid
 emporio policies list                              seções do manual publicadas
 emporio policies search "pergunta" [-k N]          seções mais relevantes para a pergunta
 emporio policies lock                              registra a versão do PDF após revisar a curadoria
+emporio search "pergunta" [--kind product|policy] [-k N]   busca híbrida (lexical + embeddings)
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ from emporio.domain.policies import PolicyStore
 from emporio.log import configure_logging, get_logger
 from emporio.pipeline.core import PipelineError
 from emporio.pipeline.stages import build_pipeline
+from emporio.retrieval.factory import build_retriever
+from emporio.services import ServerUnavailableError, ensure_server
 
 log = get_logger(__name__)
 
@@ -57,6 +60,11 @@ def _parser() -> argparse.ArgumentParser:
     search.add_argument("query")
     search.add_argument("-k", type=int, default=3, help="máximo de seções")
     policies.add_parser("lock", help="registra o hash das seções do PDF após revisar a curadoria")
+
+    search_all = sub.add_parser("search", help="busca híbrida em produtos e políticas")
+    search_all.add_argument("query")
+    search_all.add_argument("--kind", choices=["product", "policy"])
+    search_all.add_argument("-k", type=int, default=5, help="máximo de resultados")
     return p
 
 
@@ -103,6 +111,35 @@ def _policies_cmd(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def _search_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    def run_search(embedding_url: str | None = None) -> int:
+        retriever = build_retriever(settings, embedding_url)
+        hits = retriever.search(args.query, k=args.k, kind=args.kind)
+        reason = getattr(retriever, "degraded_reason", None)
+        mode = type(retriever).__name__ + (f" (degradado: {reason})" if reason else "")
+        print(f"[{mode}]")
+        if not hits:
+            print("(nenhum resultado relevante)")
+        for i, h in enumerate(hits, start=1):
+            ranks = " ".join(f"{k}#{v}" for k, v in h.ranks.items())
+            print(f"{i:>2}. {h.doc_id:<20} {h.kind:<8} {h.score:8.4f}  [{ranks}]  {h.title}")
+        return 0
+
+    if settings.embedding_backend != "llamafile":
+        return run_search()
+    try:
+        with ensure_server(
+            "embedding",
+            settings.embedding_base_url,
+            settings.path(settings.embedding_model_file),
+            log_dir=settings.processed_dir / "logs",
+        ) as url:
+            return run_search(url)
+    except ServerUnavailableError as e:
+        print(f"⚠ {e} — usando só a busca lexical", file=sys.stderr)
+        return run_search()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -118,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
             return _pipeline_cmd(args, settings)
         if args.command == "policies":
             return _policies_cmd(args, settings)
+        if args.command == "search":
+            return _search_cmd(args, settings)
     except (PipelineError, pol.PolicyError, FileNotFoundError) as e:
         print(f"✘ {e}", file=sys.stderr)
         return 2

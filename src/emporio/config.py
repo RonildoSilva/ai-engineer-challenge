@@ -44,6 +44,22 @@ class Settings(BaseSettings):
     llm_api_key: str = "none"
     llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
 
+    # --- embeddings e busca ----------------------------------------------------------
+    # llamafile: servidor local (sobe sozinho se o modelo estiver baixado); fake: determinístico,
+    # para testes; none: só busca lexical.
+    embedding_backend: Literal["llamafile", "fake", "none"] = "llamafile"
+    embedding_base_url: str = "http://127.0.0.1:8081/v1"
+    embedding_model: str = "embeddinggemma"
+    embedding_model_file: Path = Path("models/embeddinggemma-300m/embeddinggemma-300M-Q8_0.gguf")
+    # formatos recomendados pelo EmbeddingGemma para busca (consulta × documento)
+    embedding_query_format: str = "task: search result | query: {text}"
+    embedding_doc_format: str = "title: {title} | text: {text}"
+    embedding_timeout_s: float = Field(default=60.0, gt=0)
+    embedding_batch_size: int = Field(default=8, ge=1, le=64)
+    # similaridade mínima (cosseno) para um resultado vetorial contar. Calibrada com o
+    # embeddinggemma: resposta certa ≥ 0,313; fora de escopo ≤ 0,292 (docs/embeddings_eval.md)
+    retrieval_min_similarity: float = Field(default=0.30, ge=0.0, le=1.0)
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _upper(cls, v: object) -> object:
@@ -68,6 +84,10 @@ class Settings(BaseSettings):
     @property
     def policies_json(self) -> Path:
         return self.processed_dir / "policies.json"
+
+    @property
+    def vectors_db(self) -> Path:
+        return self.processed_dir / "vectors.db"
 
     @property
     def store_db(self) -> Path:

@@ -179,3 +179,62 @@ def test_embeddings_semantic_match(embedding_server):
         return dot / (sum(x * x for x in a) ** 0.5 * sum(y * y for y in b) ** 0.5)
 
     assert cos(vecs[0], vecs[1]) > cos(vecs[0], vecs[2])
+
+
+def test_hybrid_search_with_real_embeddings_on_busy_port(built_store):
+    """Busca híbrida com o embeddinggemma real, com a porta configurada ocupada por outro serviço.
+
+    O servidor deve subir numa porta livre, a pergunta sem palavras em comum deve achar a seção
+    de privacidade e a pergunta fora de escopo não deve trazer nada.
+    """
+    if not EMBED_MODEL.exists():
+        pytest.skip("modelo de embeddings não baixado (./scripts/download_model.sh)")
+    from emporio.adapters.embedders import OpenAICompatibleEmbedder
+    from emporio.adapters.retrievers import HybridRetriever, LexicalRetriever
+    from emporio.adapters.vector_sqlite import SqliteVectorIndex, write_index
+    from emporio.config import Settings
+    from emporio.domain.policies import PolicyStore
+    from emporio.retrieval.documents import build_documents, text_hash
+    from emporio.services import ensure_server
+
+    processed = built_store.parent
+    docs = [
+        d
+        for d in build_documents(processed / "store.db", processed / "policies.json")
+        if d.kind == "policy"
+    ]
+    defaults = Settings(_env_file=None)  # type: ignore[call-arg]
+    with socket.socket() as busy:  # "outro serviço" ocupando a porta configurada
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        configured = f"http://127.0.0.1:{busy.getsockname()[1]}/v1"
+        with ensure_server(
+            "embedding", configured, EMBED_MODEL, log_dir=built_store.parent / "logs"
+        ) as url:
+            assert url != configured
+            embedder = OpenAICompatibleEmbedder(
+                url,
+                "embeddinggemma",
+                query_format=defaults.embedding_query_format,
+                doc_format=defaults.embedding_doc_format,
+            )
+            vectors = embedder.embed_documents(docs)
+            index_path = processed / "vectors_real.db"
+            write_index(
+                index_path,
+                [
+                    (d.id, d.kind, d.title, text_hash(d), v)
+                    for d, v in zip(docs, vectors, strict=True)
+                ],
+                {"model_id": embedder.model_id},
+            )
+            retriever = HybridRetriever(
+                LexicalRetriever(docs, PolicyStore.from_json(processed / "policies.json")),
+                SqliteVectorIndex(index_path),
+                embedder,
+                min_similarity=defaults.retrieval_min_similarity,
+            )
+            hits = retriever.search("como faço pra vocês esquecerem meu cadastro?")
+            assert hits[0].doc_id == "privacidade"
+            assert "vector" in hits[0].ranks
+            assert retriever.search("receita de bolo de cenoura") == []

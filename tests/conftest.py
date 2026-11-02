@@ -13,6 +13,19 @@ from emporio.pipeline.stages import build_pipeline
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _offline_embeddings():
+    """A suíte usa o embedder determinístico (sem modelo, sem servidor, rápido).
+
+    Escopo de sessão: fixtures de sessão (como `built_store`) são criadas antes das de função,
+    então o isolamento precisa valer desde o início. Testes de integração que precisam do
+    modelo real pedem isso explicitamente (`make_settings(embedding_backend="llamafile")`).
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("EMBEDDING_BACKEND", "fake")
+        yield
+
+
 def make_settings(**overrides) -> Settings:
     """Settings só de argumentos/ambiente (ignora o .env local do desenvolvedor)."""
     return Settings(_env_file=None, **overrides)  # type: ignore[call-arg]

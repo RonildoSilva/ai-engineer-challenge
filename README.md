@@ -19,6 +19,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 - [Verificação (testes e CI)](#verificação-testes-e-ci)
 - [Pipeline de dados](#pipeline-de-dados)
 - [Manual de políticas](#manual-de-políticas)
+- [Busca híbrida](#busca-híbrida)
 - [Camada de dados](#camada-de-dados)
 - [Escalabilidade e robustez](#escalabilidade-e-robustez)
 - [Modelos locais](#modelos-locais)
@@ -172,7 +173,7 @@ flowchart LR
     F & G --> H{SHA-256 confere?}
     H -->|não| X
     H -->|sim| I[cria .env]
-    I --> P[emporio pipeline run<br/>incremental]
+    I --> P[emporio pipeline run<br/>incremental · sobe o servidor<br/>de embeddings se preciso]
     P --> J([pronto])
 ```
 
@@ -198,6 +199,7 @@ uv run emporio pipeline status         # estado de cada etapa
 uv run emporio pipeline graph          # DAG em Mermaid
 uv run emporio policies list           # seções do manual de políticas publicadas
 uv run emporio policies search "posso devolver?"   # seção mais relevante para a pergunta
+uv run emporio search "violão pra ligar na caixa de som" [--kind product|policy]   # busca híbrida
 ```
 
 > Chat, servidor MCP e avaliação serão documentados aqui conforme forem implementados.
@@ -218,14 +220,14 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>180 testes, ~10 s, offline]
-        L3 --> L4[pytest -m integration<br/>4 testes, sobe os modelos reais]
+        L2 --> L3[pytest unitário<br/>224 testes, ~15 s, offline]
+        L3 --> L4[pytest -m integration<br/>5 testes, sobe os modelos reais]
     end
     K -.-> K2
 ```
 
 ```bash
-./scripts/check.sh          # tudo: lock, lint, unitários e integração (~30 s com o modelo baixado)
+./scripts/check.sh          # tudo: lock, lint, unitários e integração (~1,5 min com os modelos baixados)
 FAST=1 ./scripts/check.sh   # sem integração
 uv run pytest -m integration -rs   # só a integração com o LLM local
 ```
@@ -244,7 +246,8 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Camada de dados | regras de tratamento, 7 tipos de linha inválida reportados com `arquivo:linha campo`, integridade referencial, **7 violações barradas pelos `CHECK`s do banco**, banco anterior intacto quando a validação falha, mudança de regra refaz o `transform` (41) | `tests/test_data_layer.py` |
 | Repository | **suíte de contrato** (22, reutilizável para o Postgres) + somente leitura, injeção de SQL, uma conexão por thread (4) | `tests/contract/`, `tests/test_sqlite_repository.py` |
 | Manual de políticas | extração em seções numeradas (listas não viram seção, números não quebram), curadoria completa e em dia com o PDF, **fato ausente / seção do PDF alterada / seção sem curadoria detectados**, decisões aplicadas, busca por assunto (15 perguntas reais + 3 fora de escopo), CLI (38) | `tests/test_policies.py` |
-| Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa (4) | `tests/test_llm_integration.py` |
+| Busca | documentos (descrição suja não entra), índice vetorial, **suíte de contrato do `Retriever`** (lexical e híbrido), fusão RRF, limiar de similaridade, **degradação para lexical** (serviço fora do ar, índice vazio, modelo trocado) e recuperação, cache de vetores, etapa sem modelo, CLI (44) | `tests/test_retrieval.py`, `tests/contract/` |
+| Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo") (5) | `tests/test_llm_integration.py` |
 
 ## Pipeline de dados
 
@@ -256,8 +259,8 @@ flowchart LR
     S[snapshot_raw<br/>inventário + hashes<br/>das fontes]:::done --> V[validate_raw<br/>contratos dos CSVs<br/>+ integridade]:::done
     V --> T[transform<br/>decisões do relatório]:::done --> L[load<br/>SQLite com CHECKs]:::done --> Q[quality_checks<br/>invariantes]:::done
     S --> PE[extract_policies<br/>PDF → seções<br/>modo layout]:::done --> PS[build_policies<br/>curadoria verificada<br/>contra o PDF]:::done
-    L --> C[chunk] --> E[embed] --> I[index<br/>vetores]
-    PS --> C
+    L --> E[embed_index<br/>vetores com cache<br/>por texto]:::done
+    PS --> E
     classDef done fill:#bbf7d0,stroke:#15803d,color:#000
 ```
 
@@ -270,6 +273,7 @@ flowchart LR
 | `quality_checks` | Invariantes no banco carregado (promoção coerente, nenhum pedido sem itens, descrição oculta…) + `PRAGMA integrity_check` | `quality_report.json` |
 | `extract_policies` | Extrai o PDF em modo *layout* (preserva tabelas e listas), remove cabeçalho/rodapé de página e divide nas seções numeradas do manual, com hash por seção | `policies_extracted.json` / `.md` |
 | `build_policies` | Valida a curadoria contra a extração (ver [Manual de políticas](#manual-de-políticas)) e publica as seções com palavras-chave e custo em tokens | `policies.json` |
+| `embed_index` | Monta os 75 documentos de busca (produtos sem descrição suja + seções do manual) e grava os vetores. Reaproveita vetores de textos que não mudaram; sobe o servidor de embeddings se preciso; sem modelo, grava índice vazio e a busca fica só lexical | `vectors.db` |
 
 **Como o orquestrador decide o que rodar:**
 
@@ -327,6 +331,35 @@ flowchart LR
   retorna nada, porque é melhor não pré-buscar do que pré-buscar a seção errada. É a base da detecção de
   assunto; a busca semântica entra no próximo commit.
 
+## Busca híbrida
+
+```mermaid
+flowchart LR
+    Q([pergunta]) --> L[lexical<br/>palavras e palavras-chave<br/>curadas]
+    Q --> EM{servidor de<br/>embeddings ok?}
+    EM -->|sim| V[vetorial<br/>embeddinggemma<br/>cosseno ≥ 0,30]
+    EM -->|não| D[degrada: só lexical<br/>tenta de novo na<br/>próxima pergunta]
+    L --> F["fusão RRF<br/>Σ 1/(60 + posição)"]
+    V --> F
+    F --> H[resultados com a origem<br/>de cada um: lexical#2 vector#1]
+    D --> H
+```
+
+| Pergunta | Lexical sozinha | Vetorial sozinha | Híbrida |
+|---|---|---|---|
+| "Takamine GD20" | ✔ GD20 | ✔ GD20 | ✔ GD20 (1º nas duas) |
+| "como faço pra vocês esquecerem meu cadastro?" | ✘ nada | ✔ privacidade | ✔ privacidade |
+| "violão que dá pra ligar na caixa de som" | ✘ eletroacústico em 2º | ✘ eletroacústico em 6º | ✔ eletroacústico de aço em 1º |
+| "violão que dá pra ligar na caixa de som, com cordas de aço" | ✘ violão sem eletrônica | ✘ violão sem eletrônica | ✘ eletroacústico em 2º |
+| "receita de bolo de cenoura" | nada | nada (abaixo do limiar) | nada |
+
+- **Degradação graciosa:** sem modelo baixado, com o serviço fora do ar ou com índice de outro modelo, a busca
+  continua funcionando só com a parte lexical, e informa o motivo.
+- **Explicável:** cada resultado traz a posição que teve em cada busca.
+- **Limiar calibrado** com o modelo real: resultados vetoriais com similaridade abaixo de 0,30 não contam
+  (ver limitações).
+- `uv run emporio search "pergunta"` sobe o servidor de embeddings se preciso e o encerra ao final.
+
 ## Camada de dados
 
 ```mermaid
@@ -366,8 +399,9 @@ interfaces.
 | Configuração | `.env` validado na inicialização (falha cedo) | variáveis de ambiente / secret manager | ✅ |
 | Logs | texto no terminal | JSON, uma linha por evento (`LOG_FORMAT=json`) | ✅ |
 | Dados | SQLite somente leitura atrás de `Repository` | Postgres (mesma suíte de contrato) | ✅ SQLite · Postgres *(planejado)* |
-| Busca | lexical + embeddings com vetores em SQLite | pgvector | *(planejado)* |
-| Embeddings | embeddinggemma-300m no runtime llamafile, em CPU | API de embeddings ou GPU | ✅ modelo e servidor · índice *(planejado)* |
+| Busca | híbrida (lexical + vetores em SQLite, fusão RRF) atrás de `Retriever`; degrada para lexical | pgvector (mesma suíte de contrato) | ✅ híbrida · pgvector *(planejado)* |
+| Embeddings | embeddinggemma-300m no runtime llamafile, em CPU, atrás de `Embedder` | API de embeddings ou GPU | ✅ |
+| Serviços locais | sobem sob demanda e encerram ao final; porta ocupada → porta livre; log em arquivo | serviços dedicados (systemd/containers) | ✅ |
 | LLM | Bonsai-1.7B em CPU | modelos maiores, GPU ou API | ✅ baseline |
 
 ## Modelos locais
@@ -445,7 +479,7 @@ Detalhes e como adicionar modelos: [`models/README.md`](models/README.md).
 | Embeddings | **embeddinggemma-300m** no mesmo runtime, sempre em CPU | Venceu a [avaliação](docs/embeddings_eval.md) em acerto, latência e tamanho. Mesmo runtime do LLM, sem stack nova; bge-m3 (MIT) como alternativa se a licença Gemma for um impedimento. |
 | Políticas | **Curadoria versionada** do PDF, verificada pelo pipeline (cobertura, versão do PDF, fatos), publicada por seção | O manual tem ~3,2 mil tokens; vector DB seria desproporcional. A revisão humana resolve as contradições do PDF, e a verificação automática garante que ela não perde nem desatualiza nada. |
 | Dados | CSV → validação → limpeza → **SQLite** (atrás de uma interface `Repository`) | Vem com o Python (zero dependência nova), um arquivo só, esquema com restrições que registram as decisões do relatório, SQL com parâmetros, mesmo motor para o histórico. Com 65 produtos, um servidor seria desproporcional; Postgres entra como adaptador de escala. |
-| Busca vetorial | Embeddings atrás de uma interface `Retriever`, vetores em SQLite por padrão | As perguntas centrais (preço, estoque, pedido) são exatas, e com 65 itens um índice vetorial dedicado não se paga. **pgvector** fica como adaptador de escala, testado no CI. |
+| Busca | **Híbrida**: lexical + vetorial com fusão RRF, atrás da interface `Retriever` | A lexical acerta nomes exatos ("Takamine GD20"); a vetorial resolve perguntas sem palavras em comum ("esquecer meu cadastro"); a fusão às vezes acerta o que nenhuma das duas acerta sozinha (e às vezes não: ver a tabela em [Busca híbrida](#busca-híbrida)). Vetores em SQLite com busca exata em memória: com 75 documentos, um banco vetorial não se paga. **pgvector** fica como adaptador de escala, validado pela mesma suíte de contrato. |
 | Orquestração | **DAG próprio** (`emporio pipeline`), sem Airflow | Não há nada para agendar (dados estáticos, processados em menos de 1 s). Airflow exigiria scheduler, webserver e banco de metadados. Cada etapa corresponde 1:1 a uma task do Airflow quando houver sync com um sistema real. |
 | Reprodutibilidade | uv + `uv.lock` + Python gerenciado + manifesto SHA-256 | A equipe avaliadora reproduz o ambiente idêntico. |
 
@@ -471,7 +505,7 @@ Relatório completo, com modelo ER, gráficos e uma decisão para cada achado:
 ```mermaid
 flowchart LR
     C1[1 · estrutura +<br/>setup]:::done --> C1b[1b · testes + CI]:::done --> C2[2 · relatório<br/>de dados]:::done --> C3[3 · pipeline +<br/>config + CLI]:::done
-    C3 --> C4[4 · dados<br/>SQLite]:::done --> C4b[4b · lint<br/>ampliado]:::done --> C5[5 · políticas]:::done --> C6a[6a · avaliação e<br/>modelo de embeddings]:::done --> C6[6b · busca híbrida]:::next --> C7[7-8 · domínio]
+    C3 --> C4[4 · dados<br/>SQLite]:::done --> C4b[4b · lint<br/>ampliado]:::done --> C5[5 · políticas]:::done --> C6a[6a · avaliação e<br/>modelo de embeddings]:::done --> C6[6b · busca híbrida]:::done --> C7[7-8 · domínio]:::next
     C7 --> C9[9 · servidor MCP] --> C10[10 · perfis LLM] --> C11[11 · agente] --> C12[12 · detecção<br/>de assunto] --> C13[13 · chat +<br/>histórico]
     C13 --> C14[14 · guardrails] --> C15[15 · eval] --> C16[16 · escala<br/>Postgres/pgvector] --> C17[17 · exemplos] --> CX[19-21 · Airflow,<br/>REST, UI] --> C18[README final]
     classDef next fill:#fde68a,stroke:#b45309,color:#000
@@ -496,7 +530,9 @@ scripts/         setup, verificação (check.sh), download de modelos, start do 
                  exploração dos dados (explore_data.py), avaliação de embeddings (eval_embeddings.py)
 src/emporio/     config.py (configuração validada), log.py (logs estruturados), cli.py (emporio),
                  pipeline/ (orquestrador + etapas), data/ (contratos, regras, schema.sql, policies.py),
-                 ports.py (interfaces), adapters/ (SQLite), domain/ (modelos, busca de políticas);
+                 ports.py (interfaces), adapters/ (SQLite, embedders, índice vetorial, buscas),
+                 retrieval/ (documentos, montagem da busca), services.py (servidores locais),
+                 domain/ (modelos, busca de políticas);
                  agente e servidor MCP (planejado)
 tests/contract/  suítes de contrato reutilizáveis por adaptador
 tests/           testes automatizados (unitários + integração com o LLM local)
@@ -507,6 +543,10 @@ tests/           testes automatizados (unitários + integração com o LLM local
 
 - O baseline 1.7B em CPU é lento (~18 s por chamada em média; ~5 s com GPU) e acerta tool calling só em parte dos casos. A detecção
   de assunto mitiga isso, mas não elimina.
+- O limiar de similaridade separa pouco: no conjunto de avaliação, a resposta certa menos parecida teve 0,313
+  e a pergunta fora de escopo mais parecida, 0,292 (limiar 0,30). Ele é um filtro auxiliar; a defesa principal
+  contra perguntas fora de escopo será a detecção de assunto e os guardrails.
+- Indexar os 75 documentos em CPU leva ~1 minuto na primeira vez (depois, só o que muda é recalculado).
 - *(Lista completa e "o que faria com mais tempo" ao final do projeto.)*
 
 ## Uso de assistentes de código
@@ -531,6 +571,10 @@ Este projeto está sendo desenvolvido com o **Claude Code** como par de programa
   último do push.
 - **Verificações que pegam o que passaria batido:** a checagem de fatos da curadoria encontrou uma omissão
   na revisão manual do PDF na primeira execução.
+- **Testes e investigação pegando problemas reais na busca:** o embedder de teste aproximava tudo de tudo
+  por causa de stopwords; a fusão quebrava se um resultado lexical não estivesse no índice vetorial; a
+  suíte passou de 10 s para 118 s porque uma fixture de sessão subia o modelo real (corrigido para 12 s); e
+  a porta 8081 desta máquina estava ocupada por outro serviço, o que levou à troca automática de porta.
 - **Medir antes de escolher, e corrigir o que foi publicado:** o modelo de embeddings foi escolhido por
   avaliação com gabarito, não por reputação. A investigação de uma queda revelou que o runtime usava a GPU
   integrada sem avisar, e que medições já publicadas como "sem GPU" estavam erradas; o README foi corrigido
