@@ -1,0 +1,166 @@
+{
+  "lexical": {
+    "hit@1": 0.7,
+    "hit@3": 0.7,
+    "mrr": 0.72,
+    "top1": [
+      "p83",
+      "p116",
+      "atendimento",
+      "p86",
+      "p132",
+      "atendimento",
+      "p139",
+      "p142",
+      "p131",
+      "p82",
+      "trocas_devolucoes",
+      "horarios",
+      "pagamento",
+      "frete_entregas",
+      "garantia",
+      "promocoes",
+      null,
+      null,
+      "atendimento",
+      null
+    ]
+  },
+  "embeddinggemma-300m": {
+    "dim": 768,
+    "load_s": 1.5,
+    "index_s": 124.8,
+    "query_ms": 104,
+    "rss_mb": 2365.0,
+    "dense": {
+      "hit@1": 0.9,
+      "hit@3": 0.95,
+      "mrr": 0.935
+    },
+    "hybrid": {
+      "hit@1": 0.9,
+      "hit@3": 0.95,
+      "mrr": 0.933
+    },
+    "misses_dense": [
+      "ukulele pequeno para uma criança",
+      "violão que dá pra ligar na caixa de som, com cordas de aço"
+    ],
+    "top1_dense": [
+      "p85",
+      "p126",
+      "p110",
+      "p86",
+      "p132",
+      "p138",
+      "p141",
+      "p142",
+      "p131",
+      "p82",
+      "trocas_devolucoes",
+      "horarios",
+      "pagamento",
+      "frete_entregas",
+      "garantia",
+      "promocoes",
+      "privacidade",
+      "sobre_contato",
+      "atendimento",
+      "frete_entregas"
+    ]
+  },
+  "bge-m3": {
+    "dim": 1024,
+    "load_s": 2.0,
+    "index_s": 207.5,
+    "query_ms": 170,
+    "rss_mb": 2504.0,
+    "dense": {
+      "hit@1": 0.85,
+      "hit@3": 0.95,
+      "mrr": 0.9
+    },
+    "hybrid": {
+      "hit@1": 0.85,
+      "hit@3": 0.9,
+      "mrr": 0.89
+    },
+    "misses_dense": [
+      "o instrumento parou de funcionar depois de quatro meses de uso",
+      "onde vocês ficam?",
+      "estou muito chateado com o atendimento, quero reclamar"
+    ],
+    "top1_dense": [
+      "p85",
+      "p118",
+      "p113",
+      "p103",
+      "p132",
+      "p138",
+      "p141",
+      "p143",
+      "p131",
+      "p82",
+      "trocas_devolucoes",
+      "horarios",
+      "pagamento",
+      "frete_entregas",
+      "trocas_devolucoes",
+      "promocoes",
+      "privacidade",
+      "horarios",
+      "trocas_devolucoes",
+      "trocas_devolucoes"
+    ]
+  },
+  "qwen3-emb-0.6b": {
+    "dim": 1024,
+    "load_s": 2.5,
+    "index_s": 286.7,
+    "query_ms": 386,
+    "rss_mb": 5039.0,
+    "dense": {
+      "hit@1": 0.7,
+      "hit@3": 0.9,
+      "mrr": 0.821
+    },
+    "hybrid": {
+      "hit@1": 0.75,
+      "hit@3": 0.95,
+      "mrr": 0.847
+    },
+    "misses_dense": [
+      "ukulele pequeno para uma criança",
+      "violão que dá pra ligar na caixa de som, com cordas de aço",
+      "guitarra para tocar heavy metal rápido",
+      "violão clássico de nylon de nível intermediário",
+      "em quanto tempo uma encomenda chega em Corumbá?",
+      "o instrumento parou de funcionar depois de quatro meses de uso"
+    ],
+    "top1_dense": [
+      "p85",
+      "p127",
+      "p109",
+      "p86",
+      "p131",
+      "p135",
+      "p139",
+      "p143",
+      "p131",
+      "p81",
+      "trocas_devolucoes",
+      "horarios",
+      "pagamento",
+      "trocas_devolucoes",
+      "p99",
+      "promocoes",
+      "privacidade",
+      "sobre_contato",
+      "atendimento",
+      "frete_entregas"
+    ]
+  },
+  "nomic-v2-moe": {
+    "error": "Remote end closed connection without response"
+  }
+}

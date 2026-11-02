@@ -123,3 +123,59 @@ def test_tool_calling_structured(client):
     assert calls, "esperava um tool_call estruturado"
     assert calls[0].function.name == "detalhar_produto"
     assert "gd20" in json.loads(calls[0].function.arguments)["nome"].lower().replace(" ", "")
+
+
+# ------------------------------------------------------------------------------ embeddings
+
+EMBED_MODEL = ROOT / "models/embeddinggemma-300m/embeddinggemma-300M-Q8_0.gguf"
+
+
+@pytest.fixture(scope="module")
+def embedding_server():
+    if not EMBED_MODEL.exists():
+        pytest.skip("modelo de embeddings não baixado (./scripts/download_model.sh)")
+    port = free_port()
+    proc = subprocess.Popen(
+        [str(ROOT / "scripts/start_llamafile.sh")],
+        env={**os.environ, "MODE": "embedding", "PORT": str(port)},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    base = f"http://127.0.0.1:{port}"
+    try:
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(f"{base}/health", timeout=2) as r:
+                    if json.load(r).get("status") == "ok":
+                        break
+            except OSError:
+                pass
+            if proc.poll() is not None:
+                pytest.fail(f"servidor de embeddings encerrou com código {proc.returncode}")
+            time.sleep(1)
+        else:
+            pytest.fail("servidor de embeddings não ficou saudável em 120 s")
+        yield base
+    finally:
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=30)
+
+
+def test_embeddings_semantic_match(embedding_server):
+    """Pergunta sem palavras em comum com o manual encontra a seção certa (caso do relatório)."""
+    client = OpenAI(base_url=f"{embedding_server}/v1", api_key="none")
+    texts = [
+        "task: search result | query: como faço pra vocês esquecerem meu cadastro?",
+        "title: Privacidade | text: O cliente pode solicitar a exclusão de seus dados pessoais.",
+        "title: Horário | text: Segunda a sexta-feira das 09:00 às 18:00.",
+    ]
+    vecs = [d.embedding for d in client.embeddings.create(model="emb", input=texts).data]
+    assert len(vecs[0]) == 768
+
+    def cos(a, b):
+        dot = sum(x * y for x, y in zip(a, b, strict=True))
+        return dot / (sum(x * x for x in a) ** 0.5 * sum(y * y for y in b) ** 0.5)
+
+    assert cos(vecs[0], vecs[1]) > cos(vecs[0], vecs[2])

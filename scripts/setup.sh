@@ -36,12 +36,14 @@ uv python install
 uv sync --locked
 ok "ambiente Python: $(.venv/bin/python --version)"
 
-# 4. Runtime llamafile (Mozilla) + modelo baseline (PrismML), ambos com SHA-256 verificado
+# 4. Runtime llamafile (Mozilla), LLM baseline (PrismML) e modelo de embeddings (Google, via
+#    ggml-org), todos com SHA-256 verificado
 if [[ -z "${SKIP_MODEL:-}" ]]; then
   ./scripts/download_model.sh llamafile-0.10.6
   ./scripts/download_model.sh bonsai-1.7b
+  ./scripts/download_model.sh embeddinggemma-300m
 else
-  echo "… modelo local ignorado (SKIP_MODEL=1)"
+  echo "… modelos locais ignorados (SKIP_MODEL=1)"
 fi
 
 # 5. Configuração

@@ -21,7 +21,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 - [Manual de políticas](#manual-de-políticas)
 - [Camada de dados](#camada-de-dados)
 - [Escalabilidade e robustez](#escalabilidade-e-robustez)
-- [Modelo local (baseline)](#modelo-local-baseline)
+- [Modelos locais](#modelos-locais)
 - [Decisões técnicas](#decisões-técnicas)
 - [Tratamento de dados e suposições](#tratamento-de-dados-e-suposições)
 - [Roadmap](#roadmap)
@@ -152,6 +152,7 @@ Tudo está fixado. Nada depende do que "já estava instalado" na máquina.
 | Dependências Python | travadas em `uv.lock` | `uv sync --locked` (automático) | — |
 | Runtime llamafile | **0.10.6** *thin*, SHA-256 em `models/manifest.tsv` | `./scripts/download_model.sh llamafile-0.10.6` (automático) | servidor do LLM local |
 | Modelo Bonsai-1.7B | GGUF oficial PrismML, SHA-256 em `models/manifest.tsv` | `./scripts/download_model.sh bonsai-1.7b` (automático) | LLM baseline |
+| Modelo de embeddings | embeddinggemma-300m (GGUF via `ggml-org`), SHA-256 em `models/manifest.tsv` | `./scripts/download_model.sh embeddinggemma-300m` (automático) | busca semântica |
 
 > Prefira o instalador oficial do uv. A versão via **snap** às vezes encerrava com código 120 sem repassar o
 > stdout durante o desenvolvimento.
@@ -167,7 +168,7 @@ flowchart LR
     C -->|sim| D[uv python install<br/>CPython 3.12.14]
     D --> E[uv sync --locked]
     E --> F[download runtime<br/>llamafile 0.10.6]
-    F --> G[download GGUF<br/>Bonsai-1.7B]
+    F --> G[download GGUFs<br/>Bonsai-1.7B +<br/>embeddinggemma-300m]
     F & G --> H{SHA-256 confere?}
     H -->|não| X
     H -->|sim| I[cria .env]
@@ -176,7 +177,7 @@ flowchart LR
 ```
 
 ```bash
-./scripts/setup.sh                 # tudo (~300 MB de download na primeira vez)
+./scripts/setup.sh                 # tudo (~630 MB de download na primeira vez)
 SKIP_MODEL=1 ./scripts/setup.sh    # sem runtime/modelo local (ex.: usar só API online)
 ```
 
@@ -184,11 +185,12 @@ SKIP_MODEL=1 ./scripts/setup.sh    # sem runtime/modelo local (ex.: usar só API
 
 ```bash
 ./scripts/start_llamafile.sh         # terminal 1: Bonsai-1.7B em http://127.0.0.1:8080/v1 (modelo "bonsai")
+MODE=embedding ./scripts/start_llamafile.sh   # (opcional) embeddings em http://127.0.0.1:8081/v1
 uv run python scripts/smoke_llm.py   # terminal 2: chat simples + chamada de ferramenta
 ```
 
-`start_llamafile.sh` aceita variáveis de ambiente: `MODEL`, `ALIAS`, `PORT`, `CTX` (default 8192), `THREADS`
-e `REASONING` (`off` por padrão).
+`start_llamafile.sh` aceita variáveis de ambiente: `MODE` (`chat` ou `embedding`), `MODEL`, `ALIAS`, `PORT`,
+`CTX`, `THREADS`, `GPU` (chat: `auto`; embedding: `disable`) e `REASONING` (`off` por padrão, só no chat).
 
 ```bash
 uv run emporio pipeline run            # pipeline de dados (pula o que está em dia)
@@ -216,8 +218,8 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>174 testes, ~10 s, offline]
-        L3 --> L4[pytest -m integration<br/>3 testes, sobe o Bonsai real]
+        L2 --> L3[pytest unitário<br/>180 testes, ~10 s, offline]
+        L3 --> L4[pytest -m integration<br/>4 testes, sobe os modelos reais]
     end
     K -.-> K2
 ```
@@ -231,10 +233,10 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Camada | O que garante | Arquivo |
 |---|---|---|
 | Qualidade de código | [ruff](https://docs.astral.sh/ruff/) com ~30 famílias de regras: correção (`F`, `B`, `PL`), **segurança** (`S`/bandit), exceções (`TRY`, `BLE`), pytest (`PT`), pathlib (`PTH`), datas com fuso (`DTZ`), estilo de docstring (`D`, Google) e formatação. Exceções justificadas uma a uma no `pyproject.toml` | `pyproject.toml` |
-| Versões fixadas | Python exato e gerenciado, `requires-python`, uv no setup e no README, `uv.lock` atualizado | `tests/test_infra.py` (27 testes nas 5 linhas de infraestrutura) |
+| Versões fixadas | Python exato e gerenciado, `requires-python`, uv no setup e no README, `uv.lock` atualizado; todo artefato do manifesto é baixado pelo setup | `tests/test_infra.py` (33 testes nas 5 linhas de infraestrutura) |
 | Manifesto | URLs fixadas em tag/commit (nunca `main`/`latest`), SHA-256 válido, artefatos baixados íntegros | `tests/test_infra.py` |
 | Download | baixa, é idempotente, **recusa checksum errado** sem deixar lixo, não sobrescreve arquivo corrompido sem `FORCE=1` | `tests/test_infra.py` |
-| Scripts | sintaxe bash válida, executáveis, erro claro sem artefatos | `tests/test_infra.py` |
+| Scripts | sintaxe bash válida, executáveis, erro claro sem artefatos, `MODE` inválido rejeitado, política de GPU por modo | `tests/test_infra.py` |
 | `.gitignore` | binários, `.env`, `_raw/` e gerados fora do git; manifesto, `.env.example` e dados brutos dentro | `tests/test_infra.py` |
 | Relatório de dados | cada número de `docs/data_report.md` continua verdadeiro sobre `data/raw` (11) | `tests/test_data_findings.py` |
 | Orquestrador | ordem topológica, ciclo/dependência inexistente rejeitados, execução incremental por conteúdo, invalidação por entrada/código/versão, saída adulterada detectada, falha isola dependentes, linhagem (19) | `tests/test_pipeline_core.py` |
@@ -242,7 +244,7 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Camada de dados | regras de tratamento, 7 tipos de linha inválida reportados com `arquivo:linha campo`, integridade referencial, **7 violações barradas pelos `CHECK`s do banco**, banco anterior intacto quando a validação falha, mudança de regra refaz o `transform` (41) | `tests/test_data_layer.py` |
 | Repository | **suíte de contrato** (22, reutilizável para o Postgres) + somente leitura, injeção de SQL, uma conexão por thread (4) | `tests/contract/`, `tests/test_sqlite_repository.py` |
 | Manual de políticas | extração em seções numeradas (listas não viram seção, números não quebram), curadoria completa e em dia com o PDF, **fato ausente / seção do PDF alterada / seção sem curadoria detectados**, decisões aplicadas, busca por assunto (15 perguntas reais + 3 fora de escopo), CLI (38) | `tests/test_policies.py` |
-| LLM real | servidor sobe pelo script, contexto 8192, alias `bonsai`, responde chat e devolve **tool call estruturado** (3) | `tests/test_llm_integration.py` |
+| Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa (4) | `tests/test_llm_integration.py` |
 
 ## Pipeline de dados
 
@@ -365,35 +367,69 @@ interfaces.
 | Logs | texto no terminal | JSON, uma linha por evento (`LOG_FORMAT=json`) | ✅ |
 | Dados | SQLite somente leitura atrás de `Repository` | Postgres (mesma suíte de contrato) | ✅ SQLite · Postgres *(planejado)* |
 | Busca | lexical + embeddings com vetores em SQLite | pgvector | *(planejado)* |
-| Embeddings | modelo GGUF no mesmo runtime llamafile | API ou GPU | *(planejado)* |
+| Embeddings | embeddinggemma-300m no runtime llamafile, em CPU | API de embeddings ou GPU | ✅ modelo e servidor · índice *(planejado)* |
 | LLM | Bonsai-1.7B em CPU | modelos maiores, GPU ou API | ✅ baseline |
 
-## Modelo local (baseline)
+## Modelos locais
 
 ```mermaid
 flowchart LR
     subgraph SRC[Fontes oficiais fixadas]
         M1[mozilla-ai/llamafile<br/>release 0.10.6]
         M2[prism-ml/Bonsai-1.7B-gguf<br/>commit 210a9e9]
+        M3[ggml-org/embeddinggemma-300M-GGUF<br/>commit 0f741b5]
     end
     M1 -->|SHA-256| R[models/runtime/<br/>llamafile-0.10.6-thin]
-    M2 -->|SHA-256| G[models/bonsai-1.7b/<br/>Bonsai-1.7B.gguf]
-    R --> S[start_llamafile.sh<br/>--server --jinja]
-    G --> S
-    S --> API[/v1/chat/completions<br/>compatível com OpenAI/]
+    M2 -->|SHA-256| G[Bonsai-1.7B.gguf]
+    M3 -->|SHA-256| E[embeddinggemma-300M-Q8_0.gguf]
+    R --> S1[start_llamafile.sh<br/>MODE=chat · GPU=auto]
+    G --> S1
+    R --> S2[start_llamafile.sh<br/>MODE=embedding · CPU]
+    E --> S2
+    S1 --> API1[/:8080/v1/chat/completions/]
+    S2 --> API2[/:8081/v1/embeddings/]
 ```
+
+O mesmo runtime oficial serve os dois modelos. Detalhes, licenças e a política de CPU/GPU por modo:
+[`models/README.md`](models/README.md).
+
+### LLM de chat: Bonsai-1.7B
 
 - **Bonsai-1.7B** (PrismML): arquitetura Qwen3, 1.72B params, quantização de 1 bit (~248 MB), contexto de
   treino 32k (usamos 8k).
 - **Runtime e GGUF separados**, ambos de fontes oficiais com checksum. O `.llamafile` único usado no início
   do desenvolvimento é exatamente essa combinação: o GGUF embutido nele tem SHA-256 idêntico ao oficial.
-- **Medições iniciais** (exploratórias, não fazem parte do CI) (CPU 8 vCPU, sem GPU, 4 perguntas × 2 execuções, 2 tools no prompt):
+- **Medições** (exploratórias, não fazem parte do CI; 4 perguntas × 2 execuções, 2 tools no prompt,
+  máquina de desenvolvimento com 8 vCPU, Intel UHD 620 e NVIDIA MX150):
 
-  | Configuração | Tool calls corretas | Tempo médio |
+  | Configuração | Tool calls corretas | Tempo médio por chamada |
   |---|---|---|
-  | `--reasoning off` (default) | 4/8 | ~4,8–6,7 s |
-  | `--reasoning on` | 4/8 | ~6,0 s |
+  | `--reasoning off`, **CPU** (`--gpu disable`, padrão do script) | 4/8 | ~18,4 s |
+  | `--reasoning off`, GPU automática (iGPU via Vulkan) | 4/8 | ~4,8–6,7 s |
+  | `--reasoning on`, GPU automática | 4/8 | ~6,0 s |
 
+  O llamafile usa a GPU automaticamente quando encontra uma. As primeiras medições foram registradas como
+  "sem GPU", mas o log mostrou modo GPU; a tabela acima já está corrigida. O acerto não muda entre CPU e
+  GPU, só a latência. Por isso o chat roda com `GPU=auto`: aproveita a GPU se existir e cai para CPU sem
+  ela (como no CI). `GPU=disable` força CPU.
+
+### Embeddings: embeddinggemma-300m
+
+Escolhido numa [avaliação com 4 candidatos](docs/embeddings_eval.md) (20 perguntas com gabarito sobre os 65
+produtos e as 10 seções de políticas, tudo em CPU):
+
+| Modelo | Acerto no 1º | Acerto no top 3 | Consulta | Download | Licença |
+|---|---|---|---|---|---|
+| Busca lexical (atual) | 70% | 70% | ~0 ms | — | — |
+| **embeddinggemma-300m** ✅ | **90%** | **95%** | **104 ms** | **334 MB** | Gemma Terms |
+| bge-m3 | 85% | 95% | 170 ms | 635 MB | MIT |
+| Qwen3-Embedding-0.6B | 70% | 90% | 386 ms | 639 MB | Apache-2.0 |
+| nomic-embed-text-v2-moe | inviável: contexto de 512 tokens | | | 512 MB | Apache-2.0 |
+
+O ganho real aparece em perguntas sem palavras em comum com o texto ("como faço pra vocês esquecerem meu
+cadastro?" → privacidade) e em palavras ambíguas ("baixo de quatro cordas", que a busca lexical mandava para
+"atendimento" por causa de *cordas*). Os embeddings rodam **sempre em CPU**: lotes grandes derrubaram o
+driver da GPU integrada nos testes.
   O raciocínio não melhora o acerto nesse porte, então fica desligado.
 
 Detalhes e como adicionar modelos: [`models/README.md`](models/README.md).
@@ -405,7 +441,8 @@ Detalhes e como adicionar modelos: [`models/README.md`](models/README.md).
 | API de negócio | **Servidor MCP** (SDK oficial `mcp`) | Separa regras de negócio da orquestração; interoperável (Claude Desktop, Inspector, llamafile); primitivas certas (tools, resources, prompts). |
 | Abordagem | Function calling + **detecção de assunto com pré-busca** para todos os modelos | Dados exatos vêm de código testado; compensa a fraqueza de modelos pequenos em tool calling. |
 | LLM | Cliente compatível com OpenAI, **perfis** offline/online | Um caminho de código para llamafile, Ollama, APIs. Começamos por modelos pequenos (≤ 4B). |
-| Baseline | Bonsai-1.7B via llamafile 0.10.6 | Gratuito, offline, CPU, ~250 MB. |
+| Baseline | Bonsai-1.7B via llamafile 0.10.6 | Gratuito, offline, ~250 MB; usa GPU se houver, CPU se não. |
+| Embeddings | **embeddinggemma-300m** no mesmo runtime, sempre em CPU | Venceu a [avaliação](docs/embeddings_eval.md) em acerto, latência e tamanho. Mesmo runtime do LLM, sem stack nova; bge-m3 (MIT) como alternativa se a licença Gemma for um impedimento. |
 | Políticas | **Curadoria versionada** do PDF, verificada pelo pipeline (cobertura, versão do PDF, fatos), publicada por seção | O manual tem ~3,2 mil tokens; vector DB seria desproporcional. A revisão humana resolve as contradições do PDF, e a verificação automática garante que ela não perde nem desatualiza nada. |
 | Dados | CSV → validação → limpeza → **SQLite** (atrás de uma interface `Repository`) | Vem com o Python (zero dependência nova), um arquivo só, esquema com restrições que registram as decisões do relatório, SQL com parâmetros, mesmo motor para o histórico. Com 65 produtos, um servidor seria desproporcional; Postgres entra como adaptador de escala. |
 | Busca vetorial | Embeddings atrás de uma interface `Retriever`, vetores em SQLite por padrão | As perguntas centrais (preço, estoque, pedido) são exatas, e com 65 itens um índice vetorial dedicado não se paga. **pgvector** fica como adaptador de escala, testado no CI. |
@@ -434,7 +471,7 @@ Relatório completo, com modelo ER, gráficos e uma decisão para cada achado:
 ```mermaid
 flowchart LR
     C1[1 · estrutura +<br/>setup]:::done --> C1b[1b · testes + CI]:::done --> C2[2 · relatório<br/>de dados]:::done --> C3[3 · pipeline +<br/>config + CLI]:::done
-    C3 --> C4[4 · dados<br/>SQLite]:::done --> C4b[4b · lint<br/>ampliado]:::done --> C5[5 · políticas]:::done --> C6[6 · busca híbrida<br/>embeddings]:::next --> C7[7-8 · domínio]
+    C3 --> C4[4 · dados<br/>SQLite]:::done --> C4b[4b · lint<br/>ampliado]:::done --> C5[5 · políticas]:::done --> C6a[6a · avaliação e<br/>modelo de embeddings]:::done --> C6[6b · busca híbrida]:::next --> C7[7-8 · domínio]
     C7 --> C9[9 · servidor MCP] --> C10[10 · perfis LLM] --> C11[11 · agente] --> C12[12 · detecção<br/>de assunto] --> C13[13 · chat +<br/>histórico]
     C13 --> C14[14 · guardrails] --> C15[15 · eval] --> C16[16 · escala<br/>Postgres/pgvector] --> C17[17 · exemplos] --> CX[19-21 · Airflow,<br/>REST, UI] --> C18[README final]
     classDef next fill:#fde68a,stroke:#b45309,color:#000
@@ -450,12 +487,13 @@ config/          perfis de LLM                                   (planejado)
 data/raw/        CSVs e manual de políticas originais
 data/curated/    curadoria do manual (uma seção .md por tema + _source.yaml) — versionada
 data/processed/  artefatos gerados (SQLite, policies.json, extração do PDF) — não versionado
-docs/            relatório de dados (data_report.md); workflow com IA (planejado)
+docs/            relatório de dados (data_report.md), avaliação de embeddings (embeddings_eval.md/.json);
+                 workflow com IA (planejado)
 evals/           cenários e resultados por modelo                 (planejado)
 examples/        conversas de exemplo                             (planejado)
 models/          manifest.tsv (versionado) + binários (não versionados)
 scripts/         setup, verificação (check.sh), download de modelos, start do llamafile, smoke test,
-                 exploração dos dados (explore_data.py)
+                 exploração dos dados (explore_data.py), avaliação de embeddings (eval_embeddings.py)
 src/emporio/     config.py (configuração validada), log.py (logs estruturados), cli.py (emporio),
                  pipeline/ (orquestrador + etapas), data/ (contratos, regras, schema.sql, policies.py),
                  ports.py (interfaces), adapters/ (SQLite), domain/ (modelos, busca de políticas);
@@ -467,7 +505,7 @@ tests/           testes automatizados (unitários + integração com o LLM local
 
 ## Limitações conhecidas
 
-- O baseline 1.7B em CPU é lento (~3–14 s por chamada) e acerta tool calling só em parte dos casos. A detecção
+- O baseline 1.7B em CPU é lento (~18 s por chamada em média; ~5 s com GPU) e acerta tool calling só em parte dos casos. A detecção
   de assunto mitiga isso, mas não elimina.
 - *(Lista completa e "o que faria com mais tempo" ao final do projeto.)*
 
@@ -493,3 +531,7 @@ Este projeto está sendo desenvolvido com o **Claude Code** como par de programa
   último do push.
 - **Verificações que pegam o que passaria batido:** a checagem de fatos da curadoria encontrou uma omissão
   na revisão manual do PDF na primeira execução.
+- **Medir antes de escolher, e corrigir o que foi publicado:** o modelo de embeddings foi escolhido por
+  avaliação com gabarito, não por reputação. A investigação de uma queda revelou que o runtime usava a GPU
+  integrada sem avisar, e que medições já publicadas como "sem GPU" estavam erradas; o README foi corrigido
+  com nota explícita.

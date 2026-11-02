@@ -73,7 +73,13 @@ def test_manifest_row_is_pinned(row):
 
 def test_manifest_has_runtime_and_baseline():
     ids = {r[0] for r in manifest_rows()}
-    assert {"llamafile-0.10.6", "bonsai-1.7b"} <= ids
+    assert {"llamafile-0.10.6", "bonsai-1.7b", "embeddinggemma-300m"} <= ids
+
+
+def test_setup_downloads_every_manifest_artifact():
+    setup = (SCRIPTS / "setup.sh").read_text()
+    for row in manifest_rows():
+        assert f"download_model.sh {row[0]}" in setup, f"setup.sh não baixa {row[0]}"
 
 
 @pytest.mark.parametrize("row", manifest_rows(), ids=lambda r: r[0])
@@ -155,16 +161,33 @@ def test_download_unknown_id(fake_artifact):
 # --------------------------------------------------------------------- start_llamafile.sh
 
 
-def test_start_fails_clearly_without_artifacts():
+@pytest.mark.parametrize("mode", ["chat", "embedding"])
+def test_start_fails_clearly_without_artifacts(mode):
     import os
 
     result = run(
         [str(SCRIPTS / "start_llamafile.sh")],
-        env={**os.environ, "RUNTIME": "/nao/existe", "MODEL": "/nao/existe.gguf"},
+        env={**os.environ, "MODE": mode, "RUNTIME": "/nao/existe", "MODEL": "/nao/existe.gguf"},
         timeout=10,
     )
     assert result.returncode == 1
     assert "download_model.sh" in result.stderr
+
+
+def test_start_rejects_invalid_mode():
+    import os
+
+    result = run([str(SCRIPTS / "start_llamafile.sh")], env={**os.environ, "MODE": "x"}, timeout=10)
+    assert result.returncode == 2
+    assert "MODE inválido" in result.stderr
+
+
+def test_start_defaults_gpu_policy():
+    """Chat usa a GPU se existir; embeddings sempre em CPU (lotes grandes derrubavam a iGPU)."""
+    script = (SCRIPTS / "start_llamafile.sh").read_text()
+    chat, embedding = script.split("  embedding)")
+    assert 'GPU="${GPU:-auto}"' in chat
+    assert 'GPU="${GPU:-disable}"' in embedding
 
 
 @pytest.mark.parametrize("script", sorted(p.name for p in SCRIPTS.glob("*.sh")))
