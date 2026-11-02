@@ -61,6 +61,10 @@ class Settings(BaseSettings):
         return self.path(self.data_processed_dir)
 
     @property
+    def store_db(self) -> Path:
+        return self.processed_dir / "store.db"
+
+    @property
     def pipeline_state_file(self) -> Path:
         return self.processed_dir / "manifest.json"
 

@@ -236,20 +236,25 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 ## Pipeline de dados
 
 Todo processamento de dados passa por um **DAG de etapas idempotentes**, executado pelo `setup.sh` e pela
-CLI `emporio pipeline`. Hoje o DAG tem a etapa de inventário das fontes; as etapas abaixo marcadas como
-*(planejado)* entram nos próximos commits.
+CLI `emporio pipeline`. Etapas em verde já existem; as demais entram nos próximos commits.
 
 ```mermaid
 flowchart LR
-    S[snapshot_raw<br/>inventário + hashes<br/>das fontes]:::done --> V[validate_raw<br/>schema e regras]
-    V --> T[transform<br/>decisões do relatório] --> L[load<br/>SQLite]
+    S[snapshot_raw<br/>inventário + hashes<br/>das fontes]:::done --> V[validate_raw<br/>contratos dos CSVs<br/>+ integridade]:::done
+    V --> T[transform<br/>decisões do relatório]:::done --> L[load<br/>SQLite com CHECKs]:::done --> Q[quality_checks<br/>invariantes]:::done
     S --> PE[extract_policies<br/>PDF → texto normalizado] --> PS[policies<br/>seções curadas]
     L --> C[chunk] --> E[embed] --> I[index<br/>vetores]
     PS --> C
-    L --> Q[quality_checks]
-    I --> Q
     classDef done fill:#bbf7d0,stroke:#15803d,color:#000
 ```
+
+| Etapa | O que faz | Saída |
+|---|---|---|
+| `snapshot_raw` | Inventário das 7 fontes (hash, linhas, colunas); falha se faltar alguma | `raw_snapshot.json` |
+| `validate_raw` | Contrato Pydantic por linha (tipo, domínio, formato: preço > 0, status válido, specs em JSON, rastreio `BR…BR`, parcelas 1–12…) + unicidade e integridade referencial. Reporta **todas** as falhas com `arquivo:linha campo` | `validation_report.json` |
+| `transform` | Aplica as decisões do [relatório](docs/data_report.md): disponibilidade, descrição não confiável (7 itens), promoção vigente única, texto normalizado para busca, pagamento → forma + parcelas, dados mínimos do cliente | `staging/*.jsonl` |
+| `load` | Cria o banco a partir do [`schema.sql`](src/emporio/data/schema.sql) numa transação única; a troca do arquivo é atômica, então um erro mantém o banco anterior | `store.db` |
+| `quality_checks` | Invariantes no banco carregado (promoção coerente, nenhum pedido sem itens, descrição oculta…) + `PRAGMA integrity_check` | `quality_report.json` |
 
 **Como o orquestrador decide o que rodar:**
 
@@ -267,13 +272,41 @@ flowchart TD
 ```
 
 - **Incremental por conteúdo:** só refaz o que mudou. Se uma etapa refaz e gera o mesmo conteúdo, as
-  seguintes continuam em dia. Mudar o código de uma etapa já a invalida, sem precisar mexer na versão.
+  seguintes continuam em dia. Mudar o código de uma etapa, ou de um módulo que ela declara usar (por exemplo
+  as regras de `rules.py`), já a invalida, sem precisar mexer na versão.
 - **Linhagem:** `data/processed/manifest.json` registra, por etapa, o hash de cada entrada e saída, o
   fingerprint, a duração, as métricas e o erro. Saídas adulteradas são detectadas.
 - **Robusto a falhas:** o estado é salvo após cada etapa, com escrita atômica. Uma falha no meio não perde o
   progresso e não deixa estado inconsistente.
 - **Portável:** cada etapa é uma função `f(ctx) -> métricas` que não depende do runner, e corresponde 1:1 a
   uma task do Airflow ou do Dagster.
+
+## Camada de dados
+
+```mermaid
+flowchart LR
+    subgraph Domínio
+        M[modelos imutáveis<br/>Product · Order · Customer…]
+    end
+    P[[Repository<br/>Protocol]] --> M
+    P --> SQ[SqliteRepository<br/>somente leitura · SQL parametrizado]:::done
+    P -.escala.-> PG[PostgresRepository]
+    CT{{suíte de contrato<br/>tests/contract}} -.valida.-> SQ
+    CT -.valida.-> PG
+    SQ --> DB[(store.db)]
+    classDef done fill:#bbf7d0,stroke:#15803d,color:#000
+```
+
+- **As regras viram restrições do banco.** Por exemplo, um produto "disponível" sem estoque, um pedido
+  pendente com rastreio, uma descrição não confiável exposta ou um preço promocional acima do cheio são
+  rejeitados pelo próprio SQLite (`CHECK`). Há teste para cada violação.
+- **`Repository`** é a interface de leitura usada pelo domínio. **Não existe método para listar clientes**
+  (LGPD): dados pessoais só são lidos pontualmente, para verificar quem consulta o próprio pedido, e o
+  modelo `Customer` nem carrega o nome completo.
+- **Adaptador SQLite:** conexão somente leitura, uma conexão por thread e consultas sempre parametrizadas
+  (há teste de injeção).
+- **Suíte de contrato** (`tests/contract/repository_contract.py`): 22 testes que qualquer adaptador precisa
+  passar. É ela que vai validar o adaptador Postgres.
 
 ## Escalabilidade e robustez
 
@@ -286,7 +319,7 @@ interfaces.
 | Orquestração | DAG próprio, incremental, com linhagem | Airflow/Dagster (mesmas funções de etapa) | ✅ DAG · template Airflow *(planejado)* |
 | Configuração | `.env` validado na inicialização (falha cedo) | variáveis de ambiente / secret manager | ✅ |
 | Logs | texto no terminal | JSON, uma linha por evento (`LOG_FORMAT=json`) | ✅ |
-| Dados | SQLite | Postgres | *(planejado)* |
+| Dados | SQLite somente leitura atrás de `Repository` | Postgres (mesma suíte de contrato) | ✅ SQLite · Postgres *(planejado)* |
 | Busca | lexical + embeddings com vetores em SQLite | pgvector | *(planejado)* |
 | Embeddings | modelo GGUF no mesmo runtime llamafile | API ou GPU | *(planejado)* |
 | LLM | Bonsai-1.7B em CPU | modelos maiores, GPU ou API | ✅ baseline |
@@ -356,10 +389,10 @@ Relatório completo, com modelo ER, gráficos e uma decisão para cada achado:
 
 ```mermaid
 flowchart LR
-    C1[1 · estrutura +<br/>setup]:::done --> C1b[1b · testes + CI]:::done --> C2[2 · relatório<br/>de dados]:::done --> C3[3 · pipeline +<br/>config + CLI]:::wip
-    C3 --> C4[4 · dados<br/>SQLite] --> C5[5 · políticas] --> C6[6 · busca híbrida<br/>embeddings] --> C7[7-8 · domínio]
+    C1[1 · estrutura +<br/>setup]:::done --> C1b[1b · testes + CI]:::done --> C2[2 · relatório<br/>de dados]:::done --> C3[3 · pipeline +<br/>config + CLI]:::done
+    C3 --> C4[4 · dados<br/>SQLite]:::wip --> C5[5 · políticas] --> C6[6 · busca híbrida<br/>embeddings] --> C7[7-8 · domínio]
     C7 --> C9[9 · servidor MCP] --> C10[10 · perfis LLM] --> C11[11 · agente] --> C12[12 · detecção<br/>de assunto] --> C13[13 · chat +<br/>histórico]
-    C13 --> C14[14 · guardrails] --> C15[15 · eval] --> C16[16 · escala<br/>Postgres/pgvector] --> C17[17 · exemplos] --> C18[18 · README final]
+    C13 --> C14[14 · guardrails] --> C15[15 · eval] --> C16[16 · escala<br/>Postgres/pgvector] --> C17[17 · exemplos] --> CX[19-21 · Airflow,<br/>REST, UI] --> C18[README final]
     classDef wip fill:#fde68a,stroke:#b45309,color:#000
     classDef done fill:#bbf7d0,stroke:#15803d,color:#000
 ```
@@ -379,7 +412,10 @@ models/          manifest.tsv (versionado) + binários (não versionados)
 scripts/         setup, verificação (check.sh), download de modelos, start do llamafile, smoke test,
                  exploração dos dados (explore_data.py)
 src/emporio/     config.py (configuração validada), log.py (logs estruturados), cli.py (emporio),
-                 pipeline/ (orquestrador + etapas); agente e servidor MCP (planejado)
+                 pipeline/ (orquestrador + etapas), data/ (contratos, regras, schema.sql),
+                 ports.py (interfaces), adapters/ (SQLite), domain/ (modelos);
+                 agente e servidor MCP (planejado)
+tests/contract/  suítes de contrato reutilizáveis por adaptador
 tests/           testes automatizados (unitários + integração com o LLM local)
 .github/         CI (GitHub Actions)
 ```

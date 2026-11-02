@@ -18,7 +18,6 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
-import os
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -58,6 +57,8 @@ class Stage:
     outputs: tuple[Path, ...] = ()
     version: str = "1"
     description: str = ""
+    # módulos/objetos cujo código-fonte também invalida a etapa (ex.: regras usadas por ela)
+    code: tuple[Any, ...] = ()
 
 
 @dataclass
@@ -113,12 +114,18 @@ def _rel(p: Path, root: Path) -> str:
         return p.resolve().as_posix()
 
 
-def _code_hash(func: Callable[..., Any]) -> str:
+def _source(obj: Any) -> str:
     try:
-        src = inspect.getsource(func)
-    except (OSError, TypeError):  # funções sem fonte disponível (ex.: lambdas no REPL)
-        src = repr(func)
-    return hashlib.sha256(src.encode()).hexdigest()
+        return inspect.getsource(obj)
+    except (OSError, TypeError):  # sem fonte disponível (ex.: lambdas no REPL)
+        return repr(obj)
+
+
+def _code_hash(func: Callable[..., Any], extra: Iterable[Any] = ()) -> str:
+    h = hashlib.sha256(_source(func).encode())
+    for obj in extra:
+        h.update(_source(obj).encode())
+    return h.hexdigest()
 
 
 # ------------------------------------------------------------------------------ pipeline
@@ -179,7 +186,7 @@ class Pipeline:
         payload = {
             "name": stage.name,
             "version": stage.version,
-            "code": _code_hash(stage.func),
+            "code": _code_hash(stage.func, stage.code),
             "inputs": hash_paths(stage.inputs, self.root),
             "deps": {d: dep_fps[d] for d in sorted(stage.deps)},
         }
@@ -215,9 +222,9 @@ class Pipeline:
             s = self.stages[name]
             label = f"{name}<br/>{s.description}" if s.description else name
             lines.append(f'    {name}["{label}"]')
-        for name in self._order:
-            for d in sorted(self.stages[name].deps):
-                lines.append(f"    {d} --> {name}")
+        lines.extend(
+            f"    {d} --> {name}" for name in self._order for d in sorted(self.stages[name].deps)
+        )
         return "\n".join(lines)
 
     # --------------------------------------------------------------------- execução
@@ -228,7 +235,7 @@ class Pipeline:
         # saídas precisam existir e estar iguais ao que a etapa produziu (detecta adulteração)
         return hash_paths(stage.outputs, self.root) == prev.get("outputs", {})
 
-    def run(self, targets: Iterable[str] | None = None, force: bool = False) -> RunReport:
+    def run(self, targets: Iterable[str] | None = None, *, force: bool = False) -> RunReport:
         names = self.order(targets)
         state = self.load_state()
         stages_state: dict[str, Any] = state.setdefault("stages", {})
@@ -274,12 +281,16 @@ class Pipeline:
         metrics: dict[str, Any] = {}
         try:
             metrics = stage.func(ctx) or {}
+        except (
+            Exception
+        ) as e:  # qualquer falha da etapa vira status 'failed' (com traceback no log)
+            error = f"{type(e).__name__}: {e}"
+            log.exception("etapa falhou", extra={"stage": stage.name, "error": error})
+        else:
             missing = [_rel(o, self.root) for o in stage.outputs if not o.exists()]
             if missing:
-                raise RuntimeError(f"saídas declaradas não foram geradas: {missing}")
-        except Exception as e:  # noqa: BLE001 — qualquer falha da etapa vira status 'failed'
-            error = f"{type(e).__name__}: {e}"
-            log.error("etapa falhou", extra={"stage": stage.name, "error": error})
+                error = f"RuntimeError: saídas declaradas não foram geradas: {missing}"
+                log.error("etapa falhou", extra={"stage": stage.name, "error": error})
         duration = round(time.perf_counter() - t0, 3)
         status: Status = "failed" if error else "ok"
         stages_state[stage.name] = {
@@ -302,4 +313,4 @@ class Pipeline:
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.state_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False, sort_keys=True))
-        os.replace(tmp, self.state_file)  # escrita atômica
+        tmp.replace(self.state_file)  # escrita atômica (rename no mesmo diretório)
