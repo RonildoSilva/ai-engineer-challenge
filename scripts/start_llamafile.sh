@@ -16,7 +16,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${MODE:-chat}"
 RUNTIME="${RUNTIME:-$ROOT/models/runtime/llamafile-0.10.6-thin}"
 HOST="${HOST:-127.0.0.1}"
-THREADS="${THREADS:--1}"    # -1 = automático
+# Núcleos físicos: no i5-8265U (4 núcleos, 8 threads) o prompt sai 35% mais rápido com 4 threads
+# do que com as 8 do modo automático (19,8 × 14,6 tokens/s). Sem lscpu (macOS), automático (-1).
+physical_cores() {
+  command -v lscpu >/dev/null 2>&1 || { echo -1; return; }
+  local n
+  n="$(lscpu -p=Core,Socket 2>/dev/null | grep -v '^#' | sort -u | wc -l)"
+  [ "${n:-0}" -gt 0 ] && echo "$n" || echo -1
+}
+THREADS="${THREADS:-$(physical_cores)}"
 
 case "$MODE" in
   chat)
@@ -59,7 +67,7 @@ for f in "$RUNTIME" "$MODEL"; do
 done
 [[ -x "$RUNTIME" ]] || chmod +x "$RUNTIME"
 
-echo "Subindo $(basename "$MODEL") [$MODE] como '$ALIAS' em http://$HOST:$PORT/v1 (ctx=$CTX, gpu=$GPU)"
+echo "Subindo $(basename "$MODEL") [$MODE] como '$ALIAS' em http://$HOST:$PORT/v1 (ctx=$CTX, gpu=$GPU, threads=$THREADS)"
 # exec via bash: o llamafile é um binário APE e o bash o executa pelo sh quando o kernel recusa
 exec "$RUNTIME" -m "$MODEL" --server \
   --host "$HOST" --port "$PORT" \

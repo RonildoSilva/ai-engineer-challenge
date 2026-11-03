@@ -38,7 +38,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 
 ## Arquitetura
 
-### Visão geral *(planejado)*
+### Visão geral *(chat no terminal e histórico em SQLite: planejados)*
 
 ```mermaid
 flowchart LR
@@ -77,7 +77,7 @@ flowchart LR
 Python determinístico e testado, exposto via MCP. O LLM decide o que consultar e redige a resposta com a
 persona da loja.
 
-### Fluxo de uma mensagem *(planejado)*
+### Fluxo de uma mensagem
 
 ```mermaid
 sequenceDiagram
@@ -88,18 +88,19 @@ sequenceDiagram
     participant M as Servidor MCP
     participant L as LLM
 
-    C->>A: "Posso devolver meu pedido 8?"
-    A->>R: classifica intenção
-    R-->>A: devolução + pedido
-    A->>M: pré-busca: politicas://trocas_devolucoes
-    M-->>A: regras (7 dias, embalagem, frete)
-    A->>L: persona + contexto + histórico + tools da intenção
-    L-->>A: tool_call verificar_devolucao(pedido=8, contato=?)
-    A-->>C: pede e-mail/telefone (LGPD)
+    C->>A: "Quero devolver o pedido 8, me arrependi"
+    A->>R: intenções + dados citados
+    R-->>A: devolução · pedido 8 · sem e-mail/telefone
+    A->>M: pré-busca: consultar_politica("troca devolução …")
+    M-->>A: seção "Trocas e devoluções" (custo: ~479 tokens)
+    A->>L: persona + orientação "peça e-mail/telefone" + dados (sem schemas de tools)
+    L-->>A: explica o prazo e pede o e-mail ou telefone (LGPD)
+    A-->>C: resposta
     C->>A: "ana@coldmail.com"
-    A->>M: verificar_devolucao(8, ana@…)
-    M-->>A: elegível? prazo restante, condições
-    A->>L: resultado da tool
+    A->>R: só dados → herda a intenção do turno anterior
+    A->>M: pré-busca: verificar_devolucao(8, ana@…, "me arrependi")
+    M-->>A: elegível? prazo final, condições, próximos passos
+    A->>L: persona + histórico + resultado
     L-->>A: resposta final
     A-->>C: resposta no tom da loja
 ```
@@ -119,28 +120,36 @@ flowchart LR
 
 Por isso o host identifica a intenção e já injeta o contexto certo. Isso vale para **todos** os modelos,
 o que deixa o comportamento previsível e a comparação justa. As tools continuam disponíveis como rede de
-segurança.
+segurança: quando o assunto não é reconhecido, quando uma pré-busca falha e, em janelas grandes, sempre.
 
-### Orçamento de contexto *(planejado)*
+### Orçamento de contexto
 
 ```mermaid
 flowchart TB
     subgraph Perfil[Perfil do LLM]
-        CW[context_window<br/>auto via /props no llamafile]
+        CW[context_window<br/>auto via /props no llamafile<br/>max_output_tokens]
     end
     subgraph MCPm[Servidor MCP]
-        SZ[custo de cada informação<br/>tokens estimados por resource<br/>tools com detalhe/limite]
+        SZ[custo publicado<br/>tokens_estimados por seção do manual]
     end
     CW --> BUD{{Host: orçamento por turno}}
     SZ --> BUD
-    BUD --> S1[system prompt + schemas]
-    BUD --> S2[contexto pré-buscado]
-    BUD --> S3[histórico recente]
-    BUD --> S4[reserva p/ resposta]
+    BUD --> S0[1 · system prompt + mensagem atual<br/>sempre]
+    BUD --> S1[2 · reserva para a resposta<br/>+ margem de 5%]
+    BUD --> S2[3 · dados pré-buscados<br/>até 40% do disponível, resultado inteiro ou nada]
+    BUD --> S3[4 · definições de tools]
+    BUD --> S4[5 · histórico, do mais recente<br/>aos pares pergunta + resposta]
 ```
 
 O MCP é agnóstico ao modelo (pode atender a CLI com o Bonsai em 8k e um cliente com 128k ao mesmo tempo).
-Ele informa **quanto custa** cada informação, e o host decide **quanto cabe**.
+Ele informa **quanto custa** cada informação, e o host decide **quanto cabe**:
+
+| | Bonsai local (8k) | API online (128k) |
+|---|---|---|
+| Disponível para a entrada | 7.270 tokens | 120.576 tokens |
+| Seções do manual pedidas | 2 | 3 |
+| Produtos por busca | 5 | 5 |
+| Tools junto com a pré-busca | só se a pré-busca não resolveu | as do assunto, sempre |
 
 ---
 
@@ -195,7 +204,8 @@ uv run python scripts/smoke_llm.py   # terminal 2: chat simples + chamada de fer
 ```
 
 `start_llamafile.sh` aceita variáveis de ambiente: `MODE` (`chat` ou `embedding`), `MODEL`, `ALIAS`, `PORT`,
-`CTX`, `THREADS`, `GPU` (chat: `auto`; embedding: `disable`) e `REASONING` (`off` por padrão, só no chat).
+`CTX`, `THREADS` (padrão: núcleos físicos), `GPU` (`disable` nos dois modos; `auto` só em placa validada) e
+`REASONING` (`off` por padrão, só no chat).
 
 ```bash
 uv run emporio pipeline run            # pipeline de dados (pula o que está em dia)
@@ -236,14 +246,14 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>423 testes, ~25 s, offline]
+        L2 --> L3[pytest unitário<br/>474 testes, ~30 s, offline]
         L3 --> L4[pytest -m integration<br/>9 testes, ~5 min,<br/>sobe os modelos reais]
     end
     K -.-> K2
 ```
 
 ```bash
-./scripts/check.sh          # tudo: lock, lint, unitários e integração (~6 min com os modelos baixados; o teste de ponta a ponta do agente leva ~4)
+./scripts/check.sh          # tudo: lock, lint, unitários e integração (~6 min com os modelos baixados; o teste de ponta a ponta do agente leva ~3,5)
 FAST=1 ./scripts/check.sh   # sem integração
 uv run pytest -m integration -rs   # só a integração com o LLM local
 ```
@@ -266,9 +276,11 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Pedidos e regras | verificação por e-mail ou telefone **do titular** (com/sem DDD, +55) e mensagem neutra em qualquer falha, e-mail duplicado só abre o próprio pedido, pedido atrasado, prazos de arrependimento/defeito/preferência dentro e fora da janela, garantia legal, parcelamento pelas faixas da §3.1, frete metropolitano × outras cidades × frete especial, feriados (Páscoa calculada) e fuso de Campo Grande, CLI (70) | `tests/test_orders_rules.py` |
 | Servidor MCP | exatamente as 8 tools, todas somente leitura e com saída estruturada; nenhuma forma de listar clientes; respostas de cada tool (GD20, promoção sem PIX, alternativas, escopos, pedido verificado e não verificado, devolução, pagamento, frete, horário, políticas); erro esperado amigável, argumento inválido rejeitado, **erro inesperado sem detalhes internos**, **logs sem e-mail/telefone**; resources e prompt; transportes **stdio e HTTP** com subprocesso real (26) | `tests/test_mcp_server.py` |
 | Cliente LLM | perfis do projeto válidos (online marcados como referência), seleção e sobrescritas, **chave de API ausente com erro claro**, contexto lido de `/props` e fallback, temperatura e `max_tokens` do perfil, tools só se suportadas, **normalização de respostas de modelos pequenos** (JSON inválido nos argumentos, cercas de código, tool call escrita como texto, bloco `<think>`), servidor fora do ar e erro 5xx, CLI (25) | `tests/test_llm_client.py` |
-| Agente | persona e contexto (data de referência, loja aberta) no system prompt, tools do MCP no formato do LLM, loop tool → resultado → resposta, histórico só com perguntas e respostas, argumento inválido / tool inexistente / erro da tool devolvidos ao modelo, **nome de tool quase certo corrigido**, **resposta de segurança** (limite de rodadas, LLM fora do ar, resposta vazia), PII mascarada no rastro, agente via stdio (16) | `tests/test_agent.py` |
+| Detecção de assunto | 16 frases reais com uma intenção e 5 com várias ("quanto custa o GD20 e dá pra fazer em 10x?"), devolução não vira busca de catálogo, assunto desconhecido, subconjunto de tools, "18h"/"12x"/e-mail não viram código de modelo, dados citados (pedido, e-mail, telefone, valor, parcelas, cidade), "meu telefone é…" não é pergunta sobre a loja, **mensagem só com dados herda a intenção**, dados completados pelo histórico, trecho do produto na frase (32) | `tests/test_router.py` |
+| Orçamento de contexto | disponível = janela − resposta − margem, **8k × 128k** (seções e produtos pedidos), seções escolhidas pelo **custo publicado pelo MCP**, tudo cabe em 128k, em 8k o histórico antigo sai primeiro e aos pares, ordem das mensagens, **resultado de tool nunca cortado ao meio**, tools que não cabem saem e são reportadas (9) | `tests/test_budget.py` |
+| Agente | persona e contexto (data de referência, loja aberta) no system prompt, tools do MCP no formato do LLM, loop tool → resultado → resposta, histórico só com perguntas e respostas, argumento inválido / tool inexistente / erro da tool devolvidos ao modelo, **nome de tool quase certo corrigido**, **resposta de segurança** (limite de rodadas, LLM fora do ar, resposta vazia), PII mascarada no rastro, agente via stdio; **pré-busca**: "posso devolver?" em 1 chamada sem tools com a regra dos 7 dias, preço pronto e "sem promoção" explícito, preço do produto alimentando a simulação de 10x, pedido sem dados → pede os dados → pré-busca no turno seguinte, acessório, assunto desconhecido, janela grande; **preço sem fonte**: uma correção e depois resposta de segurança (26) | `tests/test_agent.py` |
 | Busca | documentos (descrição suja não entra), índice vetorial, **suíte de contrato do `Retriever`** (lexical e híbrido), fusão RRF, limiar de similaridade, **degradação para lexical** (serviço fora do ar, índice vazio, modelo trocado) e recuperação, cache de vetores, etapa sem modelo, CLI (44) | `tests/test_retrieval.py`, `tests/contract/` |
-| Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo"); **encerrar o `emporio mcp` (SIGTERM ou SIGHUP) encerra o servidor de embeddings**; **`LLMClient` com o Bonsai real** (contexto 8192 lido de `/props` e tool call); **agente de ponta a ponta**: "Quanto custa o Takamine GD20?" → `detalhar_produto` via MCP → resposta com R$ 2.199 (9) | `tests/test_llm_integration.py` |
+| Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo"); **encerrar o `emporio mcp` (SIGTERM ou SIGHUP) encerra o servidor de embeddings**; **`LLMClient` com o Bonsai real** (contexto 8192 lido de `/props` e tool call); **agente de ponta a ponta** (mesma conversa): "Quanto custa o Takamine GD20?" → pré-busca `detalhar_produto` → 1 chamada → R$ 2.199 sem "promocional"; "posso devolver?" → pré-busca da política → regra dos 7 dias (9) | `tests/test_llm_integration.py` |
 
 ## Pipeline de dados
 
@@ -529,37 +541,62 @@ sequenceDiagram
     autonumber
     actor C as Cliente
     participant A as Agente
-    participant L as LLM (perfil)
+    participant R as router.py
     participant M as Servidor MCP
+    participant L as LLM (perfil)
     A->>M: persona_atendente + status_loja (início da conversa)
-    C->>A: "Quanto custa o Takamine GD20?"
-    A->>L: persona + contexto + histórico + 8 tools
-    L-->>A: tool call detalhar_produto({"produto": "Takamine GD20"})
-    A->>M: call_tool
-    M-->>A: {"preco_final": 2199, "preco_pix": 2089.05, "resumo_preco": "…"}
-    A->>L: resultado da tool
-    L-->>A: resposta final
-    A-->>C: "O Takamine GD20 custa R$ 2.199,00 (R$ 2.089,05 no PIX)…"
+    C->>A: "quanto custa o GD20 e dá pra fazer em 10x?"
+    A->>R: intenções e dados citados
+    R-->>A: produto + pagamento · 10 parcelas
+    A->>M: detalhar_produto("quanto custa o GD20")
+    M-->>A: R$ 2.199,00 (ou R$ 2.089,05 no PIX) · sem promoção
+    A->>M: simular_pagamento(2199, parcelas=10)
+    M-->>A: 10x de R$ 219,90 sem juros…
+    Note over A: budget.py encaixa persona, dados e histórico na janela
+    A->>L: persona + histórico + resultados (como tool calls já respondidas), sem schemas
+    L-->>A: resposta
+    Note over A: valores em R$ conferidos com os dados
+    A-->>C: "Sim: 10x sem juros de R$ 219,90. PIX: R$ 2.089,05…"
 ```
+
+**Um turno:**
+1. **Detecção de assunto** (`router.py`, palavras-chave sobre o texto normalizado): uma ou mais intenções
+   (produto, catálogo, acessório, pedido, devolução, pagamento, frete, horário, política, saudação) e os
+   dados citados (número do pedido, e-mail/telefone, valor, parcelas, cidade). Uma mensagem só com dados
+   ("é o 8, telefone …") herda a intenção do turno anterior.
+2. **Pré-busca** (`prefetch.py`): o host chama as tools do assunto via MCP e encadeia valores (o preço do
+   produto encontrado alimenta a simulação de pagamento e o frete). Sem os dados do pedido, o modelo recebe
+   a orientação de pedi-los. Os resultados entram como uma chamada de tools já respondida, numa versão
+   enxuta: os textos prontos (`resposta`, `resumo_preco`), a promoção explícita ("nenhuma; o desconto do
+   PIX é forma de pagamento") e as orientações.
+3. **Orçamento de contexto** (`budget.py`): ver [Orçamento de contexto](#orçamento-de-contexto).
+4. **Loop**: o modelo responde. Se ainda pedir tools, o agente executa e devolve os resultados (até 5
+   rodadas). Num modelo local, as definições de tools só vão quando a pré-busca não resolveu (assunto
+   desconhecido ou falha).
+5. **Preço sem fonte**: todo valor em R$ da resposta precisa aparecer nos dados do turno (tools, mensagem
+   do cliente ou histórico). Se não aparecer, o modelo recebe uma correção; se insistir, vale a resposta
+   de segurança.
 
 **Proteções do loop:**
 - argumento com JSON inválido, tool inexistente ou erro da tool viram mensagem para o modelo corrigir;
 - nome de tool quase certo é corrigido (o Bonsai escreveu `detalhar_produtoArguments`);
 - tool call escrita como JSON solto no texto é recuperada pelo cliente LLM;
-- **resposta de segurança** se o LLM cair, se passar de 5 rodadas ou se a resposta vier vazia: encaminha à
-  equipe, com retorno em até 24 horas úteis (manual §7.3);
-- o rastro de cada turno (tools, argumentos com e-mail/telefone mascarados, latência) aparece com `--debug`.
+- **resposta de segurança** se o LLM cair, se passar de 5 rodadas, se a resposta vier vazia ou se insistir
+  em valores sem fonte: encaminha à equipe, com retorno em até 24 horas úteis (manual §7.3);
+- o rastro de cada turno (assunto, pré-busca, tools oferecidas, tokens estimados, tools chamadas com
+  e-mail/telefone mascarados, latência) aparece com `--debug`.
 
-**Resultado com o Bonsai real em CPU** (a pergunta do enunciado): o modelo chamou `detalhar_produto`, e a
-resposta trouxe os valores certos (R$ 2.199,00 e R$ 2.089,05 no PIX). Mas também mostrou os limites que o
-próximo commit ataca:
-- **latência de ~3 a 4 minutos**, porque o prompt com as 8 tools tem ~2 mil tokens;
-- **erro de redação**: o modelo chamou o preço de "promocional", sem haver promoção (os números vieram da
-  tool; o rótulo, do modelo);
-- antes de voltar para CPU, a iGPU devolvia lixo com esse mesmo prompt (ver "Modelos locais").
+**Resultado com o Bonsai real em CPU** (mesma máquina, i5-8265U):
 
-A detecção de assunto com pré-busca (próximo commit) manda só as tools da intenção e já injeta os dados
-certos, reduzindo o prompt e o espaço para esses erros.
+| Pergunta | Antes (commit 11: 8 tools no prompt) | Agora (detecção de assunto + pré-busca) |
+|---|---|---|
+| "Quanto custa o Takamine GD20?" | 2 chamadas, ~2 mil tokens, **~219 s**, chamou o preço do PIX de "promocional" | 1 chamada, 854 tokens, **~65 s**, preço e PIX certos, "não há promoção" |
+| "quanto custa o GD20 e dá pra fazer em 10x?" | — | 1 chamada, ~970 tokens (estimativa), ~105 s, 10x de R$ 219,90 e PIX certos |
+| "posso devolver?" | — | 1 chamada, 1.575 tokens, ~150 s, regra dos 7 dias, reembolso em 10 dias úteis, frete por conta da loja |
+
+O que sobra de latência é o processamento do prompt em CPU (~17–20 tokens/s neste notebook). Também ajudou
+usar só os núcleos físicos: 4 threads processam o prompt 35% mais rápido que as 8 do modo automático
+(19,8 × 14,6 tokens/s).
 
 ## Camada de dados
 
@@ -747,7 +784,7 @@ flowchart TD
     end
     subgraph F4["④ Agente"]
         direction LR
-        C10["10 · perfis<br/>de LLM"]:::done --> C11["11 · agente<br/>host MCP"]:::done --> C12["12 · detecção<br/>de assunto"]:::next --> C13["13 · chat +<br/>histórico"] --> C14["14 · guardrails"]
+        C10["10 · perfis<br/>de LLM"]:::done --> C11["11 · agente<br/>host MCP"]:::done --> C12["12 · detecção<br/>de assunto"]:::done --> C13["13 · chat +<br/>histórico"]:::next --> C14["14 · guardrails"]
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR
@@ -781,7 +818,8 @@ src/emporio/     config.py (configuração validada), log.py (logs estruturados)
                  retrieval/ (documentos, montagem da busca), services.py (servidores locais),
                  domain/ (modelos, busca de políticas, catálogo, pedidos, pagamento/frete, horário),
                  mcp_server/ (servidor MCP, saídas estruturadas, persona),
-                 agent/ (cliente LLM com perfis, cliente MCP, agente com loop de tools)
+                 agent/ (cliente LLM com perfis, cliente MCP, detecção de assunto, pré-busca,
+                         orçamento de contexto, agente com loop de tools)
 tests/contract/  suítes de contrato reutilizáveis por adaptador
 tests/           testes automatizados (unitários + integração com o LLM local)
 .github/         CI (GitHub Actions)
@@ -789,10 +827,12 @@ tests/           testes automatizados (unitários + integração com o LLM local
 
 ## Limitações conhecidas
 
-- O baseline 1.7B em CPU é lento: ~18 s por chamada com prompt curto e **~3 a 4 minutos por pergunta**
-  com o prompt completo do agente (persona + 8 tools, ~2 mil tokens). A GPU integrada desta máquina não
-  serve: corrompe prompts longos. Acerta tool calling só em parte dos casos. A detecção
-  de assunto mitiga isso, mas não elimina.
+- O baseline 1.7B em CPU é lento: com a pré-busca, **~1 a 2,5 minutos por pergunta** neste notebook
+  (antes, ~3 a 4 com as 8 tools no prompt), quase tudo processando o prompt a ~17–20 tokens/s. A GPU
+  integrada desta máquina não serve: corrompe prompts longos.
+- A detecção de assunto é por palavras-chave: uma pergunta com vocabulário fora das listas cai no assunto
+  "geral", e aí o modelo decide com 3 tools genéricas (e acerta tool calling só em parte dos casos).
+- A checagem de preço sem fonte confere valores em R$, não outros números (prazos, percentuais).
 - O limiar de similaridade separa pouco: no conjunto de avaliação, a resposta certa menos parecida teve 0,313
   e a pergunta fora de escopo mais parecida, 0,292 (limiar 0,30). Ele é um filtro auxiliar; a defesa principal
   contra perguntas fora de escopo será a detecção de assunto e os guardrails.

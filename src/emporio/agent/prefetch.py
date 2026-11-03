@@ -1,0 +1,257 @@
+"""Pré-busca: o host chama as tools do assunto detectado antes de consultar o modelo.
+
+O modelo recebe os resultados como se ele mesmo tivesse chamado as tools (uma mensagem de
+assistant com `tool_calls` seguida das mensagens `tool`). Assim, na maioria dos turnos basta
+uma chamada ao LLM, sem as definições das tools no prompt: menos tokens, menos latência e
+nenhuma chance de o modelo responder preço "de cabeça".
+
+As chamadas passam pelo MCP (o mesmo caminho das chamadas do modelo) e são encadeadas quando
+uma depende da outra: o preço do produto encontrado alimenta a simulação de pagamento e o frete.
+
+O que vai ao modelo é uma versão enxuta da saída: os textos `resposta`/`resumo_preco` já
+redigidos pelas regras do manual (preço com promoção e PIX), a promoção explícita ("nenhuma
+ativa") e as orientações. Campos numéricos soltos, que o modelo poderia rotular errado, ficam de
+fora.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from typing import Any
+
+from emporio.agent.budget import ContextBudget
+from emporio.agent.mcp_client import McpToolbox, ToolResult
+from emporio.agent.router import TOOLS, Intent, Route, product_query
+
+ASK_ORDER_DATA = (
+    "Para consultar um pedido, peça ao cliente o número do pedido e o e-mail ou telefone "
+    "cadastrado (proteção de dados). Não confirme se o pedido existe antes disso."
+)
+ASK_ORDER_DATA_RETURN = (
+    "Responda com os prazos e as condições de troca e devolução que vieram em "
+    "`consultar_politica` (por exemplo, o prazo de arrependimento). Se o cliente quiser avaliar "
+    "uma compra específica, peça o número do pedido e o e-mail ou telefone cadastrado."
+)
+USE_DATA = (
+    "Os dados abaixo já foram consultados nas ferramentas da loja para esta mensagem. Responda "
+    "com base neles, usando os preços e textos exatamente como vieram (campos `resposta` e "
+    "`preco`); não acrescente valores, prazos ou regras que não estejam ali."
+)
+# O Bonsai chamou o preço do PIX de "promocional": a ausência de promoção vai explícita.
+NO_PROMOTION = "nenhuma (o desconto do PIX é forma de pagamento, não promoção)"
+AVAILABILITY = {
+    "disponivel": "disponível",
+    "esgotado": "esgotado (sem estoque no momento)",
+    "descontinuado": "descontinuado (não é mais vendido)",
+    "em_breve": "em breve (ainda não está à venda)",
+}
+# palavras do assunto somadas à pergunta na busca do manual ("dá pra fazer em 10x?" sozinho não
+# casa com nenhuma seção; "pagamento parcelamento …" casa com a de pagamento)
+POLICY_TOPIC = {
+    Intent.POLITICA: "",
+    Intent.DEVOLUCAO: "troca devolução",
+    Intent.PAGAMENTO: "pagamento parcelamento",
+    Intent.FRETE: "frete entrega",
+}
+NO_TOOL_ANSWER = (
+    "A loja não vende acessórios; responda com a orientação recebida, sem chamar ferramentas."
+)
+
+
+@dataclass(frozen=True)
+class PrefetchCall:
+    name: str
+    arguments: dict[str, Any]
+    result: ToolResult
+    content: str  # o que vai ao modelo (versão enxuta)
+
+
+@dataclass
+class Prefetch:
+    calls: list[PrefetchCall] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)  # orientações para este turno
+    unresolved: set[Intent] = field(default_factory=set)  # intenções sem dados suficientes
+
+    def messages(self) -> list[dict[str, Any]]:
+        """Mensagens de chat no formato de uma chamada de tools já respondida."""
+        if not self.calls:
+            return []
+        ids = [f"pre{i}" for i in range(1, len(self.calls) + 1)]
+        call_msg = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": cid,
+                    "type": "function",
+                    "function": {
+                        "name": c.name,
+                        "arguments": json.dumps(c.arguments, ensure_ascii=False),
+                    },
+                }
+                for cid, c in zip(ids, self.calls, strict=True)
+            ],
+        }
+        results = [
+            {"role": "tool", "tool_call_id": cid, "content": c.content}
+            for cid, c in zip(ids, self.calls, strict=True)
+        ]
+        return [call_msg, *results]
+
+    @property
+    def evidence_text(self) -> str:
+        """Tudo o que as tools devolveram (saída completa), para conferir valores da resposta."""
+        return "\n".join(c.result.text for c in self.calls)
+
+
+async def run_prefetch(
+    route: Route, text: str, toolbox: McpToolbox, budget: ContextBudget
+) -> Prefetch:
+    """Executa as chamadas do assunto detectado, encadeando valores quando preciso."""
+    return await _Planner(route, text, toolbox, budget).run()
+
+
+class _Planner:
+    def __init__(self, route: Route, text: str, toolbox: McpToolbox, budget: ContextBudget):
+        self.route, self.text, self.toolbox, self.budget = route, text, toolbox, budget
+        self.pf = Prefetch()
+        self.price: tuple[float, bool] | None = None  # (valor, em promoção) do produto achado
+        self.policy_topics: list[Intent] = [Intent.POLITICA] if route.has(Intent.POLITICA) else []
+
+    async def call(self, name: str, args: dict[str, Any]) -> ToolResult:
+        r = await self.toolbox.call(name, args)
+        self.pf.calls.append(PrefetchCall(name, args, r, _condense(name, r, self.budget)))
+        return r
+
+    async def run(self) -> Prefetch:
+        r, pf = self.route, self.pf
+        await self.products()
+        await self.orders()
+        await self.money()
+        if r.has(Intent.HORARIO):
+            await self.call("status_loja", {})
+        if self.policy_topics:
+            topics = " ".join(POLICY_TOPIC[i] for i in self.policy_topics)
+            limit = max(self.budget.policy_sections, min(len(self.policy_topics), 3))
+            await self.call(
+                "consultar_politica", {"pergunta": f"{topics} {self.text}".strip(), "limite": limit}
+            )
+        if pf.calls:
+            pf.notes.insert(0, USE_DATA)
+        if r.has(Intent.GERAL):
+            pf.unresolved.add(Intent.GERAL)
+        pf.unresolved |= {i for i in r.intents if _failed(pf, i)}
+        return pf
+
+    async def products(self) -> None:
+        r, text, limit = self.route, self.text, self.budget.product_results
+        if r.has(Intent.ACESSORIO):
+            await self.call("buscar_produtos", {"texto": text})
+            self.pf.notes.append(NO_TOOL_ANSWER)
+        found = False
+        if r.has(Intent.PRODUTO):
+            res = await self.call("detalhar_produto", {"produto": product_query(text)})
+            data = res.data or {}
+            if data.get("situacao") == "found" and (p := data.get("produto")):
+                found = True
+                self.price = (float(p["preco_final"]), bool(p.get("promocao")))
+            elif data.get("situacao") == "not_found" and not r.has(Intent.CATALOGO):
+                await self.call("buscar_produtos", {"texto": text, "limite": limit})
+        if r.has(Intent.CATALOGO) and not found:
+            await self.call("buscar_produtos", {"texto": text, "limite": limit})
+
+    async def orders(self) -> None:
+        r, s = self.route, self.route.slots
+        identity = {"numero_pedido": s.order_id, "email_ou_telefone": s.contact}
+        if r.has(Intent.PEDIDO):
+            if s.has_order_identity:
+                await self.call("consultar_pedido", identity)
+            else:
+                self.pf.notes.append(ASK_ORDER_DATA)
+        if r.has(Intent.DEVOLUCAO):
+            if s.has_order_identity:
+                await self.call("verificar_devolucao", {**identity, "motivo": self.text})
+            else:
+                self.policy_topics.append(Intent.DEVOLUCAO)
+                self.pf.notes.append(ASK_ORDER_DATA_RETURN)
+
+    async def money(self) -> None:
+        """Pagamento e frete: com valor (do produto ou citado) calcula; sem valor, a política."""
+        r, s, price = self.route, self.route.slots, self.price
+        # numa busca por faixa ("até R$ 1000") o valor citado é filtro, não o valor da compra
+        amount = price[0] if price else (None if r.has(Intent.CATALOGO) else s.amount)
+        if r.has(Intent.PAGAMENTO):
+            if amount:
+                args: dict[str, Any] = {
+                    "valor": amount,
+                    "preco_promocional": bool(price and price[1]),
+                }
+                if s.installments:
+                    args["parcelas"] = s.installments
+                await self.call("simular_pagamento", args)
+            else:
+                self.policy_topics.append(Intent.PAGAMENTO)
+        if r.has(Intent.FRETE):
+            if amount and s.city:
+                await self.call(
+                    "calcular_frete",
+                    {"valor_pedido": amount, "cidade": s.city, "produto_ou_categoria": self.text},
+                )
+            else:
+                self.policy_topics.append(Intent.FRETE)
+
+
+def _failed(pf: Prefetch, intent: Intent) -> bool:
+    names = set(TOOLS[intent])
+    return any(c.name in names and not c.result.ok for c in pf.calls)
+
+
+# ------------------------------------------------------------------------ versão enxuta
+
+
+def _condense(name: str, r: ToolResult, budget: ContextBudget) -> str:
+    """Saída da tool reduzida ao que o modelo precisa para redigir a resposta."""
+    if not r.ok or r.data is None:
+        return r.text
+    d = r.data
+    out: dict[str, Any]
+    match name:
+        case "detalhar_produto":
+            out = {"situacao": d.get("situacao")}
+            if p := d.get("produto"):
+                out["produto"] = _product(p, full=True)
+            if c := d.get("candidatos"):
+                out["candidatos"] = [_product(x) for x in c]
+            if a := d.get("alternativas"):
+                out["alternativas"] = [_product(x) for x in a]
+        case "buscar_produtos":
+            out = {
+                "situacao": d.get("situacao"),
+                "filtros": d.get("filtros"),
+                "produtos": [_product(x) for x in d.get("produtos", [])],
+            }
+        case "consultar_politica":
+            sections = budget.pick_sections(d.get("secoes", []))
+            out = {"secoes": [{"titulo": s["titulo"], "conteudo": s["conteudo"]} for s in sections]}
+        case _:
+            out = dict(d)
+    if o := d.get("orientacao"):
+        out["orientacao"] = o
+    return json.dumps({k: v for k, v in out.items() if v not in (None, [], {})},
+                      ensure_ascii=False, separators=(",", ":"))  # fmt: skip
+
+
+def _product(p: dict[str, Any], *, full: bool = False) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "nome": p.get("nome"),
+        "disponibilidade": AVAILABILITY.get(p.get("disponibilidade", ""), p.get("disponibilidade")),
+        "preco": p.get("resumo_preco"),
+        "promocao": p.get("promocao") or NO_PROMOTION,
+    }
+    if full:
+        if specs := p.get("especificacoes"):
+            item["especificacoes"] = specs
+        if desc := p.get("descricao"):
+            item["descricao"] = desc
+    return item

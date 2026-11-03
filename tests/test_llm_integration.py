@@ -309,14 +309,16 @@ def test_llm_client_with_real_bonsai(server):
 
 
 async def test_agent_end_to_end_with_real_bonsai(server, built_store):
-    """Pergunta do enunciado, de ponta a ponta: Bonsai real → tool MCP → resposta com o preço.
+    """Duas perguntas na mesma conversa, de ponta a ponta com o Bonsai real.
 
-    Lento em CPU (~3-4 min): o prompt com as 8 tools tem ~2 mil tokens. A detecção de assunto
-    (próximo commit) reduz isso.
+    Com a detecção de assunto e a pré-busca, cada turno é uma chamada ao LLM sem definições de
+    tools (prompt de ~0,9–1,6 mil tokens). Em CPU de notebook leva ~3–4 min no total.
+    Critério do commit 12: "posso devolver?" responde com a regra dos 7 dias.
     """
     from datetime import date
 
     from emporio.agent.agent import Agent
+    from emporio.agent.budget import ContextBudget
     from emporio.agent.llm import LLMClient, get_profile
     from emporio.agent.mcp_client import McpToolbox
     from emporio.config import Settings
@@ -325,12 +327,21 @@ async def test_agent_end_to_end_with_real_bonsai(server, built_store):
     settings = Settings(  # type: ignore[call-arg]
         _env_file=None, data_processed_dir=built_store.parent, embedding_backend="fake"
     )
-    llm = LLMClient(get_profile(settings, "bonsai").model_copy(update={"base_url": f"{server}/v1"}))
+    profile = get_profile(settings, "bonsai")
+    llm = LLMClient(profile.model_copy(update={"base_url": f"{server}/v1"}))
+    budget = ContextBudget(llm.context_window(), profile.max_output_tokens)
     async with McpToolbox(build_server(settings)) as toolbox:
-        turn = await Agent(llm, toolbox, reference_date=date(2026, 3, 25)).respond(
-            "Quanto custa o Takamine GD20?"
-        )
-    assert "detalhar_produto" in [t.name for t in turn.tools]
-    assert turn.fallback is None
-    digits = turn.answer.replace(".", "").replace(" ", "")
-    assert "2199" in digits
+        agent = Agent(llm, toolbox, reference_date=date(2026, 3, 25), budget=budget)
+        price = await agent.respond("Quanto custa o Takamine GD20?")
+        refund = await agent.respond("posso devolver?")
+
+    assert [t.name for t in price.prefetched] == ["detalhar_produto"]
+    assert price.llm_calls == 1
+    assert price.fallback is None
+    assert "2199" in price.answer.replace(".", "").replace(" ", "")
+    assert "promocional" not in price.answer.lower()  # o PIX não é promoção
+
+    assert [t.name for t in refund.prefetched] == ["consultar_politica"]
+    assert refund.fallback is None
+    assert "7" in refund.answer
+    assert "dias" in refund.answer

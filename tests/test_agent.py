@@ -9,7 +9,8 @@ from typing import Any
 
 import pytest
 
-from emporio.agent.agent import FALLBACK_ANSWER, Agent
+from emporio.agent.agent import FALLBACK_ANSWER, Agent, ungrounded_prices
+from emporio.agent.budget import ContextBudget
 from emporio.agent.llm import ChatResult, LLMUnavailableError, ToolCall, _bare_json_tool_call
 from emporio.agent.mcp_client import McpToolbox, compact
 from emporio.mcp_server.server import build_server
@@ -49,9 +50,9 @@ def server(built_store):
     return build_server(make_settings(data_processed_dir=built_store.parent))
 
 
-async def run(server, llm: ScriptedLLM, *questions: str, max_rounds: int = 5):
+async def run(server, llm: ScriptedLLM, *questions: str, max_rounds: int = 5, **kwargs):
     async with McpToolbox(server) as toolbox:
-        agent = Agent(llm, toolbox, reference_date=REF, max_rounds=max_rounds)
+        agent = Agent(llm, toolbox, reference_date=REF, max_rounds=max_rounds, **kwargs)
         return [await agent.respond(q) for q in questions], agent
 
 
@@ -70,9 +71,9 @@ async def test_system_prompt_has_persona_and_context(server):
     assert turn.tools == []
 
 
-async def test_all_mcp_tools_are_offered_in_openai_format(server):
+async def test_without_routing_all_mcp_tools_are_offered_in_openai_format(server):
     llm = ScriptedLLM([answer("ok")])
-    await run(server, llm, "oi")
+    await run(server, llm, "oi", routing=False)
     tools = llm.tools_seen[0] or []
     assert {t["function"]["name"] for t in tools} >= {"detalhar_produto", "consultar_pedido"}
     detalhar = next(t for t in tools if t["function"]["name"] == "detalhar_produto")
@@ -174,6 +175,124 @@ async def test_empty_answer_gives_safe_answer(server):
     (turn,), _ = await run(server, ScriptedLLM([answer("   ")]), "oi")
     assert turn.answer == FALLBACK_ANSWER
     assert "vazia" in (turn.fallback or "")
+
+
+# ============================================================================ pré-busca
+
+
+def tool_results(messages: list[dict]) -> dict[str, dict]:
+    """Resultados pré-buscados que o modelo recebeu, por nome da tool."""
+    calls = {c["id"]: c["function"]["name"]
+             for m in messages if m.get("tool_calls") for c in m["tool_calls"]}  # fmt: skip
+    return {calls[m["tool_call_id"]]: json.loads(m["content"])
+            for m in messages if m["role"] == "tool"}  # fmt: skip
+
+
+async def test_return_question_is_answered_from_prefetched_policy_in_one_call(server):
+    """Critério do commit: "posso devolver?" chega ao modelo já com a regra dos 7 dias."""
+    llm = ScriptedLLM([answer("Pode sim! Você tem até 7 dias corridos após o recebimento.")])
+    (turn,), _ = await run(server, llm, "posso devolver?")
+    assert turn.llm_calls == 1
+    assert llm.tools_seen[0] is None  # nenhuma definição de tool no prompt
+    assert [t.name for t in turn.prefetched] == ["consultar_politica"]
+    secoes = tool_results(llm.seen[0])["consultar_politica"]["secoes"]
+    assert secoes[0]["titulo"] == "Trocas e devoluções"
+    assert "7 (sete) dias corridos após o recebimento" in secoes[0]["conteudo"]
+    system = llm.seen[0][0]["content"]
+    assert "número do pedido" in system  # orienta a pedir os dados para avaliar um pedido
+
+
+async def test_product_price_comes_ready_and_without_promotion_label(server):
+    """O Bonsai chamou o preço de tabela de "promocional": agora a promoção vem explícita."""
+    llm = ScriptedLLM([answer("O GD20 sai por R$ 2.199,00 (ou R$ 2.089,05 no PIX).")])
+    (turn,), _ = await run(server, llm, "Quanto custa o Takamine GD20?")
+    produto = tool_results(llm.seen[0])["detalhar_produto"]["produto"]
+    assert produto["promocao"].startswith("nenhuma")
+    assert "não promoção" in produto["promocao"]
+    assert produto["disponibilidade"] == "disponível"
+    assert produto["preco"] == "R$ 2.199,00 (ou R$ 2.089,05 no PIX, 5% de desconto)"
+    assert "preco_final" not in produto  # números soltos ficam de fora da versão enxuta
+    assert turn.fallback is None
+    assert turn.prompt_tokens < 1200  # era ~2 mil com as 8 tools
+
+
+async def test_product_price_feeds_the_payment_simulation(server):
+    llm = ScriptedLLM([answer("Dá sim: 10x de R$ 219,90 sem juros.")])
+    (turn,), _ = await run(server, llm, "quanto custa o GD20 e dá pra fazer em 10x?")
+    assert [t.name for t in turn.prefetched] == ["detalhar_produto", "simular_pagamento"]
+    assert turn.prefetched[1].arguments == {"valor": 2199.0, "preco_promocional": False,
+                                            "parcelas": 10}  # fmt: skip
+    pagamento = tool_results(llm.seen[0])["simular_pagamento"]
+    assert {"vezes": 10, "valor": 219.9} in pagamento["parcelas"]
+    assert turn.answer.startswith("Dá sim")  # 219,90 está nos dados: passa na checagem
+
+
+async def test_order_without_data_asks_for_it_then_prefetches_on_followup(server):
+    llm = ScriptedLLM([answer("Me passa o número do pedido e o e-mail?"),
+                       answer("Seu pedido está atrasado.")])  # fmt: skip
+    turns, _ = await run(server, llm, "cadê meu pedido?", "é o 8, telefone (67) 99654-7821")
+    assert turns[0].prefetched == []
+    assert "número do pedido" in llm.seen[0][0]["content"]
+    assert turns[1].route is not None
+    assert turns[1].route.inherited
+    assert [t.name for t in turns[1].prefetched] == ["consultar_pedido"]
+    assert turns[1].prefetched[0].arguments["email_ou_telefone"] == "***"
+    assert tool_results(llm.seen[1])["consultar_pedido"]["verificado"] is True
+
+
+async def test_accessory_is_redirected_without_tools(server):
+    llm = ScriptedLLM([answer("Não vendemos palhetas, só instrumentos.")])
+    await run(server, llm, "vocês vendem palheta?")
+    assert llm.tools_seen[0] is None
+    assert tool_results(llm.seen[0])["buscar_produtos"]["situacao"] == "accessory"
+
+
+async def test_unknown_subject_offers_only_generic_tools(server):
+    llm = ScriptedLLM([answer("Só posso ajudar com a loja.")])
+    (turn,), _ = await run(server, llm, "qual a receita de bolo de cenoura?")
+    assert turn.prefetched == []
+    assert set(turn.tools_offered) == {"buscar_produtos", "detalhar_produto",
+                                       "consultar_politica"}  # fmt: skip
+
+
+async def test_large_window_also_offers_the_subject_tools(server):
+    llm = ScriptedLLM([answer("Pode sim, em até 7 dias.")])
+    big = ContextBudget(window=128_000, reserve_output=1024)
+    (turn,), _ = await run(server, llm, "posso devolver?", budget=big)
+    assert set(turn.tools_offered) == {"verificar_devolucao", "consultar_politica"}
+    assert turn.prefetched[0].arguments["limite"] == 3  # mais seções do manual cabem
+
+
+# ============================================================================ preço sem fonte
+
+
+def test_ungrounded_prices():
+    evidence = ['{"preco":"R$ 2.199,00 (ou R$ 2.089,05 no PIX)"}', '{"valor":219.9}', "até R$1000"]
+    assert ungrounded_prices("Custa R$ 2.199,00 ou R$ 2.089,05 no PIX.", evidence) == []
+    assert ungrounded_prices("10x de R$ 219,90", evidence) == []
+    assert ungrounded_prices("opções até R$ 1.000", evidence) == []  # valor citado pelo cliente
+    assert ungrounded_prices("Custa $120.", evidence) == ["$120"]
+    assert ungrounded_prices("sai por 1.899 reais", evidence) == ["1.899 reais"]
+    assert ungrounded_prices("Você tem 7 dias para devolver.", evidence) == []
+
+
+async def test_invented_price_gets_one_correction_then_passes(server):
+    llm = ScriptedLLM([answer("Custa R$ 120,00!"), answer("Custa R$ 2.199,00.")])
+    (turn,), _ = await run(server, llm, "Quanto custa o Takamine GD20?")
+    assert turn.price_retry == ["R$ 120,00"]
+    assert "R$ 120,00" in llm.seen[1][-1]["content"]  # o modelo foi avisado do valor sem fonte
+    assert turn.answer == "Custa R$ 2.199,00."
+    assert turn.fallback is None
+
+
+async def test_invented_price_twice_gives_safe_answer(server):
+    llm = ScriptedLLM([answer("Custa $120."), answer("Custa $130.")])
+    (turn,), agent = await run(server, llm, "quanto custa um violão bom?")
+    assert turn.answer == FALLBACK_ANSWER
+    assert "sem fonte" in (turn.fallback or "")
+    assert (
+        agent.messages[-1]["content"] == FALLBACK_ANSWER
+    )  # o valor inventado não fica no histórico
 
 
 # ============================================================================ normalização

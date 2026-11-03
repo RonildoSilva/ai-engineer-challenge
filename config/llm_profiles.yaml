@@ -23,7 +23,10 @@ profiles:
     max_output_tokens: 512
     temperature: 0.2
     supports_tools: true
-    timeout_s: 180          # CPU pura chega a ~18 s por chamada; margem para respostas longas
+    # CPU de notebook processa ~20 tokens/s de prompt e gera ~1,5–5,5 tokens/s: uma resposta pode
+    # levar minutos. Repetir após timeout recomeça o trabalho, então: timeout longo e sem retry.
+    timeout_s: 600
+    max_retries: 0
     local:
       mode: chat
       model_file: models/bonsai-1.7b/Bonsai-1.7B.gguf

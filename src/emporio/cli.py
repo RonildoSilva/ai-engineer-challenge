@@ -33,6 +33,7 @@ from pydantic import ValidationError
 
 from emporio.adapters.sqlite_repo import SqliteRepository
 from emporio.agent.agent import Agent
+from emporio.agent.budget import ContextBudget
 from emporio.agent.llm import (
     LLMClient,
     LLMConfigError,
@@ -413,15 +414,28 @@ def _ask_cmd(args: argparse.Namespace, settings: Settings) -> int:
 
             async def go():
                 async with McpToolbox(server) as toolbox:
-                    agent = Agent(llm, toolbox, reference_date=settings.reference_date)
+                    budget = ContextBudget(llm.context_window(), profile.max_output_tokens)
+                    agent = Agent(
+                        llm, toolbox, reference_date=settings.reference_date, budget=budget
+                    )
                     return await agent.respond(args.question)
 
             turn = asyncio.run(go())
         print(turn.answer)
         if args.debug:
             print(
-                f"\n— {turn.llm_calls} chamada(s) ao LLM em {turn.latency_s:.1f} s", file=sys.stderr
+                f"\n— {turn.llm_calls} chamada(s) ao LLM em {turn.latency_s:.1f} s, "
+                f"prompt ~{turn.prompt_tokens} tokens",
+                file=sys.stderr,
             )
+            if turn.route:
+                intents = ", ".join(i.value for i in turn.route.intents)
+                offered = ", ".join(turn.tools_offered) or "nenhuma"
+                print(f"  · assunto: {intents} | tools oferecidas: {offered}", file=sys.stderr)
+            for t in turn.prefetched:
+                print(f"  · pré-busca {t.name}({t.arguments}) {t.output[:160]}", file=sys.stderr)
+            if turn.price_retry:
+                print(f"  · valores sem fonte corrigidos: {turn.price_retry}", file=sys.stderr)
             for t in turn.tools:
                 status = "ok" if t.ok else "erro"
                 print(f"  · {t.name}({t.arguments}) [{status}] {t.output[:160]}", file=sys.stderr)
