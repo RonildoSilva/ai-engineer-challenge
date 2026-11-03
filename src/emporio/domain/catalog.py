@@ -128,6 +128,25 @@ _STRING_COUNT = re.compile(r"\b(\d+|quatro|cinco|seis|sete|oito|doze)\s+cordas\b
 _INSTRUMENT = "|".join(sorted((re.escape(t) for t in CATEGORY_TERMS), key=len, reverse=True))
 
 
+# Instrumentos que existem, mas a loja não trabalha (nenhuma categoria do catálogo os cobre).
+# Sem isto, "tem sanfona?" virava uma busca sem casamento, e a busca devolvia os mais baratos.
+NOT_CARRIED: dict[str, str] = {
+    "sanfona": "sanfona", "sanfonas": "sanfona", "acordeon": "acordeon", "acordeao": "acordeon",
+    "acordeom": "acordeon", "gaita": "gaita", "gaitas": "gaita", "cavaquinho": "cavaquinho",
+    "cavaquinhos": "cavaquinho", "cavaco": "cavaquinho", "bandolim": "bandolim", "harpa": "harpa",
+    "banjo": "banjo", "berimbau": "berimbau", "viola caipira": "viola caipira",
+}  # fmt: skip
+
+
+def detect_not_carried(text: str) -> str | None:
+    """Instrumento citado que a loja não vende (e nenhuma categoria do catálogo foi citada)."""
+    if detect_category(text) is not None:
+        return None
+    t = f" {normalize(text)} "
+    found = [(len(k), v) for k, v in NOT_CARRIED.items() if f" {k} " in t]
+    return max(found)[1] if found else None
+
+
 def detect_accessory(text: str) -> str | None:
     """Acessório pedido no texto (a loja não vende), ou None.
 
@@ -173,7 +192,7 @@ def descriptive_terms(text: str) -> set[str]:
 
 # ------------------------------------------------------------------------------ serviço
 
-Scope = Literal["ok", "accessory", "empty_category", "no_match"]
+Scope = Literal["ok", "accessory", "empty_category", "no_match", "not_carried"]
 
 
 @dataclass(frozen=True)
@@ -252,6 +271,13 @@ class CatalogService:
         text = (text or "").strip()
         if text and (acc := detect_accessory(text)):
             return SearchResult("accessory", [], {"acessorio": acc}, ACCESSORY_NOTE)
+        if text and (item := detect_not_carried(text)):
+            sold = ", ".join(c.name for c in self._categories.values() if c.product_count)
+            return SearchResult(
+                "not_carried", [], {"instrumento": item, "categorias": sold},
+                f"A loja não trabalha com {item}. Informe com transparência e apresente as "
+                f"categorias do catálogo: {sold}.",
+            )  # fmt: skip
 
         cat_id = self._resolve_category(category) if category is not None else None
         if cat_id is None and text:
@@ -279,6 +305,12 @@ class CatalogService:
             availability=["disponivel"] if only_available else None,
         )
         ranked = self._rank(text, candidates)
+        if self._nothing_matches(text, ranked, cat_id, min_price, max_price):
+            return SearchResult(
+                "no_match", [], filters,
+                "Nada no catálogo corresponde ao que foi pedido. Não ofereça produtos aleatórios: "
+                "diga que não encontrou e pergunte mais detalhes ou ofereça as categorias.",
+            )  # fmt: skip
         if not ranked:
             return SearchResult("no_match", [], filters, "Nenhum produto atende a esses critérios.")
         return SearchResult("ok", [self.view(p) for p in ranked[:limit]], filters)
@@ -339,6 +371,25 @@ class CatalogService:
     def _by_id(self, value: str | int) -> Product | None:
         raw = str(value).strip().lower().removeprefix("p")
         return self._repo.get_product(int(raw)) if raw.isdigit() else None
+
+    def _nothing_matches(
+        self,
+        text: str,
+        ranked: list[Product],
+        cat_id: int | None,
+        min_price: float | None,
+        max_price: float | None,
+    ) -> bool:
+        """Pedido descreve algo, sem filtro de categoria/preço, e a busca não achou nada disso.
+
+        Sem esta checagem, a ordem caía no preço e "tem sanfona?" devolvia ukuleles.
+        """
+        if not text or cat_id is not None or min_price is not None or max_price is not None:
+            return False
+        if not descriptive_terms(text) or self._retriever is None:
+            return False
+        hits = {h.doc_id for h in self._retriever.search(text, k=10, kind="product")}
+        return not any(f"p{p.product_id}" in hits for p in ranked)
 
     def _rank(self, text: str, candidates: list[Product]) -> list[Product]:
         """Ordena pela busca híbrida/lexical; quem ela não ranqueou vem depois, por preço.

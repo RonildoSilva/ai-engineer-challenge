@@ -64,7 +64,19 @@ fi
 uv run --locked emporio pipeline run
 ok "pipeline de dados em dia (linhagem em data/processed/manifest.json)"
 
-# 7. Verificação rápida: lock, lint e testes unitários (~40 s). A integração com os modelos reais
+# 7. Interface web (React + Vite): build com as versões exatas do package-lock.json. Precisa de
+#    Node >= 20.19 (versão de referência em web/.nvmrc). Sem Node, o resto do projeto funciona
+#    (CLI, API, MCP) e a interface pode ser construída depois, ou usada pelo docker compose.
+if command -v node >/dev/null 2>&1 \
+  && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>20||(a===20&&b>=19)?0:1)'; then
+  npm --prefix web ci --ignore-scripts --no-audit --no-fund
+  npm --prefix web run build
+  ok "interface web construída (web/dist): uv run emporio web"
+else
+  echo "… interface web não construída: instale Node $(cat web/.nvmrc) (ou >= 20.19) e rode o setup de novo"
+fi
+
+# 8. Verificação rápida: lock, lint e testes unitários (~40 s). A integração com os modelos reais
 #    fica no ./scripts/check.sh completo.
 if [[ -z "${SKIP_CHECK:-}" ]]; then
   FAST=1 ./scripts/check.sh

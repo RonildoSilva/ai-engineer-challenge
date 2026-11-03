@@ -29,7 +29,7 @@ class Produto(BaseModel):
 
 
 class BuscaProdutos(BaseModel):
-    situacao: str = Field(description="ok | accessory | empty_category | no_match")
+    situacao: str = Field(description="ok | accessory | empty_category | no_match | not_carried")
     filtros: dict[str, str | float | bool | None]
     produtos: list[Produto]
     orientacao: str | None = None

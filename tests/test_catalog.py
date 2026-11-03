@@ -312,3 +312,35 @@ def test_model_code_in_the_question_picks_that_product(svc, query, name):
 
 def test_brand_alone_is_still_ambiguous(svc):
     assert svc.detail("takamine").status == "ambiguous"
+
+
+@pytest.mark.parametrize(
+    ("query", "item"),
+    [("Tem sanfona?", "sanfona"), ("vocês vendem acordeão?", "acordeon"),
+     ("quero um cavaquinho", "cavaquinho"), ("tem viola caipira?", "viola caipira")],
+)  # fmt: skip
+def test_instrument_the_store_does_not_carry(svc, query, item):
+    """Antes, "tem sanfona?" devolvia os ukuleles mais baratos (nada casava e caía no preço)."""
+    r = svc.search(query)
+    assert r.scope == "not_carried"
+    assert r.items == []
+    assert r.filters["instrumento"] == item
+    assert "Violões" in r.filters["categorias"]
+    assert "Cordas Orquestrais" not in r.filters["categorias"]  # categoria vazia não é oferecida
+
+
+def test_description_that_matches_nothing_is_no_match_not_the_cheapest(svc):
+    r = svc.search("quero um teremim")
+    assert r.scope == "no_match"
+    assert r.items == []
+
+
+def test_category_with_unmatched_words_still_lists_the_category(svc):
+    """Com categoria citada, palavras que não casam não esvaziam a busca ("violão roxo")."""
+    r = svc.search("violão roxo barato")
+    assert r.scope == "ok"
+    assert r.items
+
+
+def test_not_carried_does_not_shadow_a_real_category(svc):
+    assert svc.search("violão ou cavaquinho?").scope == "ok"

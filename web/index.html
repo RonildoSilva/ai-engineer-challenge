@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Atendimento da Empório da Música com a Mel, assistente virtual" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Mel · Empório da Música</title>
+    <!-- tema antes do primeiro paint (sem "piscar" claro → escuro) -->
+    <script>
+      (function () {
+        var t = null;
+        try { t = localStorage.getItem("emporio.tema"); } catch (e) {}
+        if (t !== "light" && t !== "dark") {
+          t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = t;
+      })();
+    </script>
+    <!-- endereço da API: config.js (estático aqui; gerado pelo `emporio web --api …`) -->
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

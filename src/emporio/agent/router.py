@@ -18,7 +18,12 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from emporio.data.rules import brands_in, normalize
-from emporio.domain.catalog import detect_accessory, detect_category, extract_price_range
+from emporio.domain.catalog import (
+    detect_accessory,
+    detect_category,
+    detect_not_carried,
+    extract_price_range,
+)
 
 
 class Intent(StrEnum):
@@ -247,6 +252,8 @@ def policy_terms(text: str) -> list[str]:
 def _product_intents(text: str, t: str, *, service: bool) -> list[Intent]:
     if detect_accessory(text):
         return [Intent.ACESSORIO]
+    if detect_not_carried(text):
+        return [Intent.CATALOGO]  # "tem sanfona?": a busca do catálogo responde que não trabalha
     found: list[Intent] = []
     specific = bool(brands_in(text) or _MODEL_CODE.search(_drop_slot_tokens(text)))
     if specific:

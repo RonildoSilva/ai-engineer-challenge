@@ -117,6 +117,16 @@ def contact_reply(data: dict[str, Any]) -> str | None:
     return "Aqui estão os contatos da Empório da Música 🎸 " + " · ".join(found) + "."
 
 
+def not_carried_reply(item: str | None, categories: str | None) -> str:
+    """Instrumento que a loja não trabalha: resposta pronta, com o que ela tem."""
+    what = item or "esse instrumento"
+    offer = f" Nosso catálogo tem {categories.lower()}." if categories else ""
+    return (
+        f"No momento a Empório da Música não trabalha com {what}.{offer} Posso te ajudar a "
+        "escolher algum deles? 🎶"
+    )
+
+
 def hours_reply(data: dict[str, Any]) -> str:
     """Resposta pronta de horário: situação agora + horário da semana + datas especiais."""
     parts = [data.get("resposta", ""), f"Nosso horário: {data.get('horario_semanal', '')}"]
@@ -289,9 +299,13 @@ class _Planner:
                     "buscar_produtos", {"texto": text, "limite": limit, "detalhe": "resumo"}
                 )
         if r.has(Intent.CATALOGO) and not found:
-            await self.call(
+            res = await self.call(
                 "buscar_produtos", {"texto": text, "limite": limit, "detalhe": "resumo"}
             )
+            data = res.data or {}
+            if r.intents == (Intent.CATALOGO,) and data.get("situacao") == "not_carried":
+                f = data.get("filtros") or {}
+                self.pf.direct_answer = not_carried_reply(f.get("instrumento"), f.get("categorias"))
 
     async def orders(self) -> None:
         r, s = self.route, self.route.slots

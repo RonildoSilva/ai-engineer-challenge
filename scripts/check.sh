@@ -20,6 +20,15 @@ uv run --locked ruff format --check .
 step "testes unitários"
 uv run --locked pytest
 
+if [[ -d web/node_modules ]]; then
+  step "interface web: tipos, testes e build (versões do package-lock.json)"
+  npm --prefix web run typecheck
+  npm --prefix web test
+  npm --prefix web run build >/dev/null
+else
+  echo "… interface web: dependências não instaladas (o setup instala quando há Node)"
+fi
+
 if [[ -z "${FAST:-}" ]]; then
   step "testes de integração (LLM local real)"
   uv run --locked pytest -m integration -rs

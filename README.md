@@ -6,8 +6,11 @@ Protótipo de agente de atendimento por texto para a loja fictícia **Empório d
 As regras de negócio ficam expostas por um **servidor MCP**. O agente conversa com **LLMs locais ou online**,
 e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafile.
 
-> 🚧 **Em construção.** Status por etapa em [Roadmap](#roadmap). Diagramas marcados com *(planejado)*
-> descrevem a arquitetura-alvo; o restante já existe no repositório.
+> **Comece por aqui:** [Como rodar](#como-rodar) (um comando de setup e `uv run emporio chat`, ou a
+> [interface web](#interface-web)), [Decisões técnicas](#decisões-técnicas), [Avaliação](#avaliação),
+> [Conversas de exemplo](#conversas-de-exemplo), [Limitações conhecidas](#limitações-conhecidas) e
+> [Uso de assistentes de código](#uso-de-assistentes-de-código). O histórico de commits conta a evolução, etapa
+> por etapa ([Roadmap](#roadmap)).
 
 ---
 
@@ -25,6 +28,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 - [Servidor MCP (a API)](#servidor-mcp-a-api)
 - [Agente](#agente)
 - [API REST](#api-rest)
+- [Interface web](#interface-web)
 - [Avaliação](#avaliação)
 - [Conversas de exemplo](#conversas-de-exemplo)
 - [Camada de dados](#camada-de-dados)
@@ -170,6 +174,7 @@ Tudo está fixado. Nada depende do que "já estava instalado" na máquina.
 | Runtime llamafile | **0.10.6** *thin*, SHA-256 em `models/manifest.tsv` | `./scripts/download_model.sh llamafile-0.10.6` (automático) | servidor do LLM local |
 | Modelo Bonsai-1.7B | GGUF oficial PrismML, SHA-256 em `models/manifest.tsv` | `./scripts/download_model.sh bonsai-1.7b` (automático) | LLM baseline |
 | Modelo de embeddings | embeddinggemma-300m (GGUF via `ggml-org`), SHA-256 em `models/manifest.tsv` | `./scripts/download_model.sh embeddinggemma-300m` (automático) | busca semântica |
+| Node.js *(opcional)* | **20.20.0** (`web/.nvmrc`; aceita ≥ 20.19) | [nodejs.org](https://nodejs.org) ou `nvm install` | só para construir a interface web; dependências travadas em `web/package-lock.json` (o setup constrói se houver Node; sem Node, o `docker compose` constrói) |
 
 > Prefira o instalador oficial do uv. A versão via **snap** às vezes encerrava com código 120 sem repassar o
 > stdout durante o desenvolvimento.
@@ -250,6 +255,7 @@ uv run emporio llm list                            # perfis de LLM (testados × 
 uv run emporio llm check [--profile bonsai]        # conexão, contexto, chat e tool calling
 uv run emporio ask "Quanto custa o Takamine GD20?" --debug   # uma pergunta ao agente, sem histórico
 uv run emporio api                                 # API REST do atendimento em http://127.0.0.1:8010
+uv run emporio web                                 # interface web em http://127.0.0.1:8020 (usa a API)
 ```
 
 Avaliação (ver [Avaliação](#avaliação)):
@@ -277,7 +283,7 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>611 testes, ~35 s, offline<br/>+51 com Postgres, job próprio]
+        L2 --> L3[pytest unitário<br/>628 testes, ~35 s, offline<br/>+51 com Postgres, job próprio]
         L3 --> L4[pytest -m integration<br/>9 testes, ~5 min,<br/>sobe os modelos reais]
     end
     K -.-> K2
@@ -301,12 +307,13 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Orquestrador | ordem topológica, ciclo/dependência inexistente rejeitados, execução incremental por conteúdo, invalidação por entrada/código/versão, saída adulterada detectada, falha isola dependentes, linhagem (19) | `tests/test_pipeline_core.py` |
 | Id de requisição | `request_id` só dentro do contexto, contexto aninhado restaura o anterior, um id por turno em todos os logs, chamadas de tool no MCP rastreáveis (3) | `tests/test_request_id.py` |
 | API REST | `/chat` com resposta e rastro, **sessão continua entre requisições** (o assunto do pedido segue), histórico com PII mascarada, guardrail sem LLM, entrada inválida (400/413/404), corpo não JSON, **`/chat/stream` com os eventos na ordem** (sessao → assunto → dados → redigindo → resposta) e stream de mensagem bloqueada, JSON legível em UTF-8, `/health`, **CORS só para a origem do front** (17) | `tests/test_api.py` |
+| Interface web | **dependências com versão exata e lockfile**, Node fixado, **texto do modelo nunca vira HTML**, nenhum recurso externo, temas claro e escuro, rotas/eventos/campos iguais aos da API, storage sempre protegido, servidor `emporio web` com `config.js` apontando para a API, erro claro sem o build (8); no Vitest: **leitor SSE** (CRLF, ping, eventos partidos entre pedaços), parser de texto (negrito, listas, títulos, sem HTML) e etapas de progresso (8) | `tests/test_web.py`, `web/src/lib/*.test.ts` |
 | DAG do Airflow | arquivo real do DAG importado com stub do Airflow: **uma task por etapa e as mesmas dependências**, cada task roda a própria etapa, grafo topológico; `run_task` exige dependências em dia, roda incremental (refaz e depois pula) e falha para o orquestrador quando a etapa falha (6) | `tests/test_airflow_dag.py` |
 | Config, logs e CLI | defaults, sobrescrita por ambiente, **config inválida falha cedo**, logs texto/JSON, `emporio pipeline` e códigos de saída (12) | `tests/test_config_cli.py` |
 | Camada de dados | regras de tratamento, 7 tipos de linha inválida reportados com `arquivo:linha campo`, integridade referencial, **7 violações barradas pelos `CHECK`s do banco**, banco anterior intacto quando a validação falha, mudança de regra refaz o `transform` (41) | `tests/test_data_layer.py` |
 | Repository | **suíte de contrato** (22, reutilizável para o Postgres) + somente leitura, injeção de SQL, uma conexão por thread (4) | `tests/contract/`, `tests/test_sqlite_repository.py` |
 | Manual de políticas | extração em seções numeradas (listas não viram seção, números não quebram), curadoria completa e em dia com o PDF, **fato ausente / seção do PDF alterada / seção sem curadoria detectados**, decisões aplicadas, busca por assunto (15 perguntas reais + 3 fora de escopo), CLI (38) | `tests/test_policies.py` |
-| Catálogo | preço com promoção × PIX (§6.2), faixa de preço e categoria extraídas do texto, acessórios × "violão de 7 cordas", exemplo do enunciado ("violões até R$1000": 12 opções), preço promocional nos filtros, nome aproximado e pergunta inteira ("Quanto custa o Takamine GD20?"), ambiguidade, alternativas para esgotado/descontinuado/em breve, CLI (62) | `tests/test_catalog.py` |
+| Catálogo | preço com promoção × PIX (§6.2), faixa de preço e categoria extraídas do texto, acessórios × "violão de 7 cordas", exemplo do enunciado ("violões até R$1000": 12 opções), preço promocional nos filtros, nome aproximado e pergunta inteira ("Quanto custa o Takamine GD20?"), ambiguidade, alternativas para esgotado/descontinuado/em breve, CLI; **instrumento que a loja não trabalha** (sanfona, cavaquinho… → `not_carried`, com as categorias que ela tem) e **busca sem casamento vira "não encontrado"**, não os mais baratos (antes, "tem sanfona?" devolvia ukuleles) (73) | `tests/test_catalog.py` |
 | Pedidos e regras | verificação por e-mail ou telefone **do titular** (com/sem DDD, +55) e mensagem neutra em qualquer falha, e-mail duplicado só abre o próprio pedido, pedido atrasado, prazos de arrependimento/defeito/preferência dentro e fora da janela, garantia legal, parcelamento pelas faixas da §3.1, frete metropolitano × outras cidades × frete especial, feriados (Páscoa calculada) e fuso de Campo Grande, CLI (70) | `tests/test_orders_rules.py` |
 | Servidor MCP | exatamente as 8 tools, todas somente leitura e com saída estruturada; nenhuma forma de listar clientes; respostas de cada tool (GD20, promoção sem PIX, alternativas, escopos, pedido verificado e não verificado, devolução, pagamento, frete, horário, políticas); erro esperado amigável, argumento inválido rejeitado, **erro inesperado sem detalhes internos**, **logs sem e-mail/telefone**; resources e prompt; transportes **stdio e HTTP** com subprocesso real; `detalhe="resumo"` mais barato, com a URI do resource para o texto completo (27) | `tests/test_mcp_server.py` |
 | Cliente LLM | perfis do projeto válidos (online marcados como referência), seleção e sobrescritas, **chave de API ausente com erro claro**, contexto lido de `/props` e fallback, temperatura e `max_tokens` do perfil, tools só se suportadas, **normalização de respostas de modelos pequenos** (JSON inválido nos argumentos, cercas de código, tool call escrita como texto, bloco `<think>`), servidor fora do ar e erro 5xx, CLI (25) | `tests/test_llm_client.py` |
@@ -324,7 +331,7 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 ## Pipeline de dados
 
 Todo processamento de dados passa por um **DAG de etapas idempotentes**, executado pelo `setup.sh` e pela
-CLI `emporio pipeline`. Etapas em verde já existem; as demais entram nos próximos commits.
+CLI `emporio pipeline` (e, em produção, pelo [DAG do Airflow](dags/emporio_dag.py) gerado das mesmas etapas).
 
 ```mermaid
 flowchart LR
@@ -419,7 +426,7 @@ flowchart LR
 - **Busca por assunto** (`PolicyStore.search`): determinística, por palavras-chave curadas (inclusive
   coloquiais, como "me arrependi" e "dá pra parcelar"), título e corpo. Abaixo de um limiar mínimo, não
   retorna nada, porque é melhor não pré-buscar do que pré-buscar a seção errada. É a base da detecção de
-  assunto; a busca semântica entra no próximo commit.
+  assunto; a busca semântica (embeddings) complementa a lexical na [busca híbrida](#busca-híbrida).
 
 ## Busca híbrida
 
@@ -624,7 +631,8 @@ sequenceDiagram
 2. **Pré-busca** (`prefetch.py`): o host chama as tools do assunto via MCP e encadeia valores (o preço do
    produto encontrado alimenta a simulação de pagamento e o frete; numa pergunta seguinte sem produto, como "e
    em 10x?", vale o último produto da conversa). **Respostas prontas, sem LLM**, quando o modelo só atrapalharia:
-   pedido ou devolução sem os dados do titular (pede só o que falta), acessório, reclamação, horário e contato
+   pedido ou devolução sem os dados do titular (pede só o que falta), acessório, instrumento que a loja não
+   trabalha ("tem sanfona?"), reclamação, horário e contato
    (dado puro, lido das tools). Em todas elas o Bonsai errava: repetia a orientação interna, trocava telefone e
    WhatsApp, respondia "domingo?" com o horário de hoje. Nos demais casos, os resultados entram como uma chamada de tools já respondida, numa versão
    enxuta: os textos prontos (`resposta`, `resumo_preco`), a promoção explícita ("nenhuma; o desconto do
@@ -681,8 +689,8 @@ testes cobrem tanto o que deve ser bloqueado quanto perguntas parecidas que deve
 disse sobre a cor", "qual o e-mail da loja?", "vocês pedem CPF?").
 
 **Conversa e histórico** (`chat.py`, `history.py`): `ChatSession` junta o agente, o histórico e a
-transcrição sem depender da interface. A CLI `emporio chat` usa essa classe, e a API REST e a interface web
-(planejadas) vão usar a mesma.
+transcrição sem depender da interface. A CLI `emporio chat`, a [API REST](#api-rest) e, por ela, a
+[interface web](#interface-web) usam a mesma classe.
 
 ```mermaid
 erDiagram
@@ -777,6 +785,48 @@ curl -sN -X POST localhost:8010/chat/stream -H 'Content-Type: application/json' 
 - **No compose**, o serviço `api` sobe em `127.0.0.1:8010`. **Sem autenticação**, como o MCP via HTTP: em produção,
   ficaria atrás de um gateway (e o id de sessão viria do telefone do WhatsApp, com hash).
 
+## Interface web
+
+![Interface web no tema escuro: conversa com a Mel e o painel de bastidores](docs/img/web-escuro.png)
+
+```bash
+uv run emporio api    # terminal 1: API em :8010 (sobe o Bonsai e os embeddings se preciso)
+uv run emporio web    # terminal 2: abra http://127.0.0.1:8020 (serve o build de web/dist)
+npm --prefix web run dev   # alternativa para desenvolver a interface, com recarga automática
+```
+
+Uma aplicação **React 19 + TypeScript + Tailwind CSS 4**, construída com **Vite** (`web/`), que é só mais um canal
+da [API REST](#api-rest), como seria o WhatsApp:
+
+- **Identidade da loja:** paleta marinho e dourado do logo, títulos em serifada (Lora), marca vetorial com o
+  violão. **Tema claro e escuro**: segue o sistema por padrão e alterna no topo (sistema → claro → escuro). A
+  escolha é aplicada antes do primeiro paint, sem piscar.
+- **Progresso em tempo real:** lê o `POST /chat/stream` com `fetch` e mostra a etapa (*Entendendo → Consultando a
+  loja → Escrevendo*) com o tempo corrido. Com o modelo local levando 1–2 minutos, é o que torna a espera
+  aceitável; respostas prontas aparecem na hora, marcadas como "resposta imediata".
+- **Respostas legíveis:** negrito, listas e títulos do texto do modelo viram elementos React por um parser próprio.
+  **Nenhum texto do modelo vira HTML** (não há `dangerouslySetInnerHTML`).
+- **Bastidores:** painel com o rastro de cada turno (assunto, tools consultadas via MCP, chamadas ao LLM, tokens,
+  tempo, guardrail, encaminhamento, `request_id`); no celular, numa gaveta.
+- **Sessão:** recarregar a página continua a conversa (`GET /sessions/{id}`); "Nova conversa" começa outra. Sessão
+  e tema ficam no navegador, mas sem armazenamento (aba privada) a página funciona igual.
+- **Sem recursos externos:** fontes empacotadas no build (`@fontsource`), sem CDN e sem Google Fonts.
+
+| Tema claro | Celular, com os bastidores abertos |
+|---|---|
+| ![Tema claro](docs/img/web-claro.png) | ![Celular com bastidores](docs/img/web-celular-bastidores.png) |
+
+**Reprodutível como o resto:** versões **exatas** no `package.json` (`.npmrc` com `save-exact`), `package-lock.json`
+versionado, Node fixado em `web/.nvmrc`, `npm ci` (instala exatamente o lockfile). O `setup.sh` constrói a interface
+quando há Node; o `check.sh` roda tipos (`tsc`), testes (Vitest: leitor SSE, parser de texto, etapas) e build; o CI
+tem um job `web` com o mesmo; e o `docker compose` constrói com Node fixado por digest e serve com nginx, então a
+interface também sobe numa máquina sem Node.
+
+**Por que separada da API:** a interface conversa com o agente pelo mesmo contrato que um webhook de WhatsApp
+usaria, então o que funciona aqui funciona no canal real, e ela sobe e escala separada do agente. A primeira versão
+foi em HTML/JS puro, sem build; a troca para Vite + React + Tailwind foi decisão do usuário, para um acabamento mais
+elegante (componentes, tema, tipografia), aceitando o custo de uma cadeia Node fixada e verificada no CI.
+
 ## Avaliação
 
 `src/emporio/evals/` mede três coisas, com gabaritos versionados em `evals/` e resultados em
@@ -821,7 +871,8 @@ de p50) porque a máquina estava mais carregada.</sub>
 
 - **Bonsai falhou em 1:** no `produto_esgotado`, disse que o Giannini GF-3D "já está disponível", mas ele está
   esgotado, e a tool disse isso (na rodada anterior ele acertou esse cenário; a temperatura é 0,2). É o erro mais
-  grave que vimos e será coberto por uma pós-checagem de status (próximo commit).
+  grave que vimos; depois desta rodada entrou uma pós-checagem de status que pega exatamente esse caso (ver
+  [Guardrails](#agente)).
 - **Evolução do Bonsai:** 16/18 na 1ª rodada. As duas falhas eram de redação sobre dados certos: no `acessorio`,
   repetiu a orientação interna; na devolução fora do prazo, escreveu "há 0 dias restantes" em vez de dizer que o
   prazo acabou. Depois dos ajustes (acessório com resposta pronta, devolução com "não é mais possível" explícito e
@@ -913,7 +964,7 @@ interfaces.
 | Dados | SQLite somente leitura atrás de `Repository` | Postgres (`STORE_BACKEND=postgres`), mesma suíte de contrato, no CI | ✅ |
 | Busca | híbrida (lexical + vetores em SQLite, fusão RRF) atrás de `Retriever`; degrada para lexical | pgvector com índice HNSW (`VECTOR_BACKEND=pgvector`), mesma suíte de contrato, no CI | ✅ |
 | Embeddings | embeddinggemma-300m no runtime llamafile, em CPU, atrás de `Embedder` | API de embeddings ou GPU | ✅ |
-| API | servidor MCP via stdio ou Streamable HTTP (local, sem autenticação) | MCP HTTP atrás de API gateway com OAuth, réplicas | ✅ MCP · auth *(planejado)* |
+| API | servidor MCP via stdio ou Streamable HTTP e API REST `/chat` (local, sem autenticação) | atrás de um API gateway com OAuth, réplicas sem estado | ✅ MCP e REST · autenticação: próximo passo |
 | Histórico | SQLite (`history.db`) atrás de `HistoryStore` | Postgres (`HISTORY_BACKEND=postgres`), mesma suíte de contrato, no CI: várias réplicas atendem a mesma sessão | ✅ |
 | Serviços locais | sobem sob demanda e encerram ao final (também com SIGTERM/SIGHUP); porta ocupada → porta livre; log em arquivo | containers: `deploy/docker-compose.yml` (LLM, embeddings, pipeline, MCP; perfil `scale` com Postgres) | ✅ |
 | LLM | perfil `bonsai` (local, CPU) | outros perfis: modelos maiores, GPU ou API | ✅ perfis · online *(referência)* |
@@ -922,13 +973,16 @@ interfaces.
 
 ```mermaid
 flowchart LR
-    subgraph default[compose padrão]
-        LLM[llm<br/>llamafile · Bonsai] 
+    subgraph base[compose padrão]
+        LLM[llm<br/>llamafile · Bonsai]
         EMB[embeddings<br/>llamafile · embeddinggemma]
         PIPE[pipeline<br/>one-shot, incremental] --> VOL[(volume<br/>data/processed)]
         EMB --> PIPE
         VOL --> MCP[mcp :8000<br/>SQLite]
         EMB --> MCP
+        WEB[web :8020<br/>nginx · HTML/JS] --> API[api :8010<br/>/chat + SSE]
+        API --> LLM
+        VOL --> API
         CHAT[chat<br/>docker compose run] --> LLM
     end
     subgraph scale[--profile scale]
@@ -1123,15 +1177,15 @@ flowchart TD
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR
-        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::done --> C17["17 · exemplos"]:::done --> C17b["17b · pendências<br/>da revisão"]:::done --> C19["19 · DAG<br/>Airflow"]:::done --> C20["20 · API REST<br/>/chat + SSE"]:::done --> C21["21 · front<br/>web"]:::next --> C18["README final"]
+        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::done --> C17["17 · exemplos"]:::done --> C17b["17b · pendências<br/>da revisão"]:::done --> C19["19 · DAG<br/>Airflow"]:::done --> C20["20 · API REST<br/>/chat + SSE"]:::done --> C21["21 · interface<br/>web"]:::done --> C18["README final"]:::done
     end
     F1 --> F2 --> F3 --> F4 --> F5
     classDef next fill:#fde68a,stroke:#b45309,color:#000
     classDef done fill:#bbf7d0,stroke:#15803d,color:#000
 ```
 
-Verde: concluído. Amarelo: próximo. Os extras (19–21: endpoint REST `/chat`, interface gráfica e template de
-DAG do Airflow) entram antes do README final.
+Todas as etapas concluídas. A ordem dos commits segue o plano: os extras (template de DAG do Airflow, API REST e
+interface web) entraram antes do README final, e cada commit passou na verificação completa antes do push.
 
 ## Estrutura do repositório
 
@@ -1141,11 +1195,12 @@ data/raw/        CSVs e manual de políticas originais
 data/curated/    curadoria do manual (uma seção .md por tema + _source.yaml) — versionada
 data/processed/  artefatos gerados (SQLite, policies.json, extração do PDF) — não versionado
 docs/            relatório de dados (data_report.md), avaliação de embeddings (embeddings_eval.md/.json),
-                 arquitetura e caminho de produção (architecture.md), teste de carga (load_test/);
-                 workflow com IA (planejado)
+                 arquitetura e caminho de produção (architecture.md), teste de carga (load_test/),
+                 screenshots da interface (img/)
 evals/           cenários, gabaritos e resultados (evals/resultados/README.md)
 deploy/          Dockerfile e docker-compose (padrão e perfil scale com Postgres + pgvector)
 dags/            template de DAG do Airflow, gerado das etapas do pipeline
+web/             interface web (React + TypeScript + Tailwind, Vite) sobre a API REST
 examples/        5 conversas com o Bonsai, comentadas (examples/README.md)
 models/          manifest.tsv (versionado) + binários (não versionados)
 scripts/         setup, verificação (check.sh), download de modelos, start do llamafile, smoke test,
@@ -1195,12 +1250,29 @@ tests/           testes automatizados (unitários + integração com o LLM local
   atrás de um gateway com OAuth (o SDK já oferece suporte).
 - A verificação de identidade aceita o telefone sem DDD (8+ dígitos finais): é prática para o cliente, mas
   mais fraca que um código por SMS/e-mail (OTP), que seria o próximo passo em produção.
-- *(Lista completa e "o que faria com mais tempo" ao final do projeto.)*
+
+**O que eu faria com mais tempo:**
+- **Modelo:** trocar o baseline pelo Qwen3-1.7B (18/18 na avaliação, mais rápido no p95) ou servir em GPU; um
+  ajuste fino (LoRA) de modelo pequeno para tool calling e redação em PT-BR, com os cenários da avaliação como
+  ponto de partida; LLM-as-judge e várias rodadas por cenário para a avaliação virar estatística.
+- **Canal:** adaptador do WhatsApp sobre a API REST (sessão pelo telefone do cliente, em hash) e autenticação
+  no gateway; verificação de identidade por código (OTP) em vez do telefone.
+- **Dados vivos:** sincronizar com o ERP pelo DAG do Airflow, e consultar estoque e status de pedido direto no
+  Postgres de produção; frete calculado por CEP nas APIs das transportadoras.
+- **Respostas:** checar também nomes de produto citados na resposta contra os dados (como já é feito com
+  preços, status e disponibilidade); classificador de assunto treinado com as frases da avaliação, no lugar
+  das palavras-chave.
+- **Operação:** traces por turno (o `request_id` já liga os logs), métricas de resposta de segurança e de
+  encaminhamento à equipe, e a avaliação rodando a cada mudança de prompt ou de modelo.
 
 ## Uso de assistentes de código
 
-Este projeto está sendo desenvolvido com o **Claude Code** como par de programação. Workflow, com detalhes em
-`docs/ai_workflow.md` *(planejado)*:
+O projeto foi desenvolvido com o **Claude Code** (Anthropic) como par de programação, do primeiro ao último commit.
+As decisões de produto e arquitetura, a definição dos padrões de qualidade e a revisão de cada etapa foram minhas;
+o assistente escreveu a maior parte do código e dos testes sob esse direcionamento, e cada commit só entrou depois
+da verificação completa (`./scripts/check.sh`) e da minha aprovação. Um plano de implementação privado, atualizado
+a cada decisão, guiou a sequência de commits. Como foi o trabalho, na prática:
+
 - **Entendimento e plano:** leitura do enunciado, dos CSVs e do PDF; levantamento de inconsistências nos dados;
   plano de implementação dividido em commits, revisado e ajustado por mim antes de cada etapa.
 - **Validação empírica antes de decidir:** testes de viabilidade do modelo local (tool calling, A/B de
@@ -1241,6 +1313,15 @@ Este projeto está sendo desenvolvido com o **Claude Code** como par de programa
 - **Testar com a pergunta real, não com a ideal:** no catálogo, "Quanto custa o Takamine GD20?" (a pergunta
   do enunciado) saía ambígua, porque "quanto custa o" diluía o nome; e "quanto custa um violão?" virava três
   produtos aleatórios. Ambos corrigidos, com testes.
+- **Avaliar o encanamento separado do modelo:** o "oráculo" da avaliação (um LLM falso que só devolve os dados
+  recebidos) achou três falhas do agente antes de qualquer modelo rodar, e separou erro de redação do modelo de
+  erro de dados. As asserções corrigidas depois de ver as respostas ficaram registradas no próprio resultado.
+- **Revisar o próprio plano:** a pedido, conferimos o plano inteiro contra o repositório; as regras descumpridas
+  (README de modelos desatualizado, setup sem a verificação final) e os itens prometidos e não feitos (histórico
+  plugável, id de requisição, pós-checagem de status) viraram um commit próprio.
+- **Testar como usuário:** as conversas de exemplo e o uso da interface expuseram bugs que os testes não pegavam
+  (pedido seguinte de violão respondido com a receita de bolo recusada; "tem sanfona?" devolvendo ukuleles); cada
+  um virou correção com teste antes do commit.
 - **Medir antes de escolher, e corrigir o que foi publicado:** o modelo de embeddings foi escolhido por
   avaliação com gabarito, não por reputação. A investigação de uma queda revelou que o runtime usava a GPU
   integrada sem avisar, e que medições já publicadas como "sem GPU" estavam erradas; o README foi corrigido

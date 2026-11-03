@@ -44,3 +44,7 @@ logs/
 .idea/
 .DS_Store
 *.swp
+
+# interface web (Vite): dependências e build
+web/node_modules/
+web/dist/

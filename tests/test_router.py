@@ -24,6 +24,7 @@ I = Intent  # noqa: E741 (abreviação só para as tabelas de casos)
         ("Quanto custa o Takamine GD20?", (I.PRODUTO,)),
         ("Quais violões vocês têm até R$1000?", (I.CATALOGO,)),
         ("tem guitarra?", (I.CATALOGO,)),
+        ("Tem sanfona?", (I.CATALOGO,)),  # instrumento que a loja não tem: o catálogo responde
         ("vocês vendem palheta?", (I.ACESSORIO,)),
         ("tem corda de violão?", (I.ACESSORIO,)),
         ("qual o status do meu pedido?", (I.PEDIDO,)),

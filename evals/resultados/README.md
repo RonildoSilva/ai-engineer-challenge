@@ -6,7 +6,7 @@ Gerado por `uv run emporio eval …` a partir dos JSON desta pasta (não editar 
 
 | Perfil | Modelo | Cenários aprovados | Falhas de asserção | Turnos com LLM | Latência p50 | Latência p95 | Prompt médio |
 |---|---|---|---|---|---|---|---|
-| oraculo | nenhum (devolve os dados) | 18/18 (100%) | 0 | 12/20 | 0.0 s | 0.1 s | 885 tokens |
+| oraculo | nenhum (devolve os dados) | 18/18 (100%) | 0 | 12/20 | 0.1 s | 1.6 s | 896 tokens |
 | bonsai | bonsai | 17/18 (94%) | 1 | 13/20 | 107.7 s | 207.4 s | 940 tokens |
 | qwen3-1.7b | qwen3-1.7b | 18/18 (100%) | 0 | 13/20 | 67.8 s | 122.5 s | 940 tokens |
 
@@ -44,7 +44,7 @@ Notas de `bonsai`:
 
 ## Classificador de intenção e guardrails (evals/intents.yaml)
 
-Acerto exato: **95%** de 59 frases (0.447 ms por frase).
+Acerto exato: **95%** de 59 frases (0.817 ms por frase).
 
 | Rótulo | Precisão | Revocação | F1 | Suporte |
 |---|---|---|---|---|

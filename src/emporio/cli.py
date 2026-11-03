@@ -21,6 +21,7 @@ emporio ask "Quanto custa o Takamine GD20?" [--debug]      uma pergunta ao agent
 emporio chat [--session ID] [--debug] [--transcript f.md]  conversa no terminal, com histórico
 emporio chat --list                                        sessões salvas
 emporio api [--port 8010] [--profile bonsai]               API REST: /chat, /chat/stream, /health
+emporio web [--port 8020] [--api http://127.0.0.1:8010]    interface web de chat (sobre a API)
 emporio db load [--database-url postgresql://…]           perfil de escala: carrega o Postgres
 emporio eval intents | retrieval                           classificador e busca (evals/)
 emporio eval scenarios [--profile bonsai --profile qwen3-1.7b]   cenários (padrão: oráculo)
@@ -168,6 +169,10 @@ def _add_agent_commands(sub: argparse._SubParsersAction) -> None:
     api.add_argument("--profile", help="perfil de LLM (padrão: LLM_PROFILE ou o default)")
     api.add_argument("--host", default="127.0.0.1")
     api.add_argument("--port", type=int, default=8010)
+    web = sub.add_parser("web", help="interface web de chat (usa a API do `emporio api`)")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8020)
+    web.add_argument("--api", default="http://127.0.0.1:8010", help="endereço da API REST")
     db = sub.add_parser("db", help="perfil de escala: Postgres + pgvector")
     db_sub = db.add_subparsers(dest="action", required=True)
     load = db_sub.add_parser("load", help="carrega store.db e vectors.db no Postgres")
@@ -612,6 +617,21 @@ def _api_cmd(args: argparse.Namespace, settings: Settings) -> int:
         return 1
 
 
+def _web_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    import uvicorn  # noqa: PLC0415
+
+    from emporio.api.web import build_web_app  # noqa: PLC0415
+
+    try:
+        app = build_web_app(settings.path(Path("web/dist")), args.api)
+    except FileNotFoundError as e:
+        print(f"✘ {e}", file=sys.stderr)
+        return 2
+    print(f"Interface em http://{args.host}:{args.port} (API: {args.api})", file=sys.stderr)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    return 0
+
+
 def _db_cmd(args: argparse.Namespace, settings: Settings) -> int:
     from emporio.adapters.postgres_repo import load_from_pipeline  # noqa: PLC0415 (extra)
 
@@ -749,6 +769,7 @@ def main(argv: list[str] | None = None) -> int:
         "eval": _eval_cmd,
         "db": _db_cmd,
         "api": _api_cmd,
+        "web": _web_cmd,
     }
     try:
         return commands[args.command](args, settings)

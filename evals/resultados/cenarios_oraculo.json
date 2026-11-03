@@ -1,5 +1,5 @@
 {
-  "gerado_em": "2026-11-03T17:24:16-03:00",
+  "gerado_em": "2026-11-03T19:09:15-03:00",
   "perfil": "oraculo",
   "modelo": "nenhum (devolve os dados)",
   "cenarios": 18,
@@ -8,9 +8,9 @@
   "falhas_de_assercao": 0,
   "turnos": 20,
   "turnos_com_llm": 12,
-  "latencia_llm_p50_s": 0.0,
-  "latencia_llm_p95_s": 0.1,
-  "prompt_tokens_medio": 885,
+  "latencia_llm_p50_s": 0.1,
+  "latencia_llm_p95_s": 1.6,
+  "prompt_tokens_medio": 896,
   "cenarios_detalhe": [
     {
       "id": "preco_gd20",
@@ -23,8 +23,8 @@
           "answer": "found Takamine GD20 Dreadnought Natural disponível R$ 2.199,00 (ou R$ 2.089,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Sapele Natural no Mogno 650mm steel Cedro Sólido Violão dreadnought Takamine com tampo sólido em cedro. Excelente para fingerstyle com timbre quente e definido.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.02,
-          "prompt_tokens": 758,
+          "latency_s": 0.1,
+          "prompt_tokens": 769,
           "tools": [
             "detalhar_produto*"
           ]
@@ -42,8 +42,8 @@
           "answer": "ok Violões 1000.0 True Tagima Memphis AC-39 Nylon Natural disponível R$ 429,90 (ou R$ 408,40 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Rozini RC-104 Nylon Estudante disponível R$ 459,90 (ou R$ 436,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Shelby SN-100 Folk Aço Preto disponível R$ 549,00 (ou R$ 521,55 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GF-1R Aço Folk Sunburst disponível R$ 579,90 (ou R$ 550,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Yamaha C40 Nylon Natural disponível R$ 599,90 (ou R$ 569,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção)",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.02,
-          "prompt_tokens": 926,
+          "latency_s": 0.06,
+          "prompt_tokens": 937,
           "tools": [
             "buscar_produtos*"
           ]
@@ -61,8 +61,8 @@
           "answer": "found Takamine GD20 Dreadnought Natural disponível R$ 2.199,00 (ou R$ 2.089,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Sapele Natural no Mogno 650mm steel Cedro Sólido Violão dreadnought Takamine com tampo sólido em cedro. Excelente para fingerstyle com timbre quente e definido. 2199.0 2089.05 1 2199.0 2 1099.5 3 733.0 4 549.75 5 439.8 6 366.5 7 314.14 8 274.88 9 244.33 10 219.9 11 199.91 12 183.25 12 True True Sim: 10x sem juros de R$ 219,90. PIX: R$ 2.089,05 (5% de desconto); débito ou boleto: R$ 2.199,00 à vista; crédito em até 12x sem juros de R$ 183,25; dá para combinar formas de pagamento (ex.: PIX + cartão).",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.01,
-          "prompt_tokens": 971,
+          "latency_s": 0.04,
+          "prompt_tokens": 982,
           "tools": [
             "detalhar_produto*",
             "simular_pagamento*"
@@ -81,8 +81,8 @@
           "answer": "found Kalani KAL-700T Tenor Natural disponível R$ 323,10 na promoção Oferta Especial (10% de desconto sobre R$ 359,00); o desconto do PIX não se soma à promoção Oferta Especial (10%) Sapele Natural no Nato 432mm nylon Spruce Ukulele tenor Kalani com corpo em Sapele e tampo em Spruce. Boa relação custo-benefício para quem busca um instrumento maior.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.0,
-          "prompt_tokens": 768,
+          "latency_s": 0.01,
+          "prompt_tokens": 779,
           "tools": [
             "detalhar_produto*"
           ]
@@ -100,8 +100,8 @@
           "answer": "found Giannini GF-3D Dreadnought Sunburst esgotado (sem estoque no momento) R$ 799,90 (ou R$ 759,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Sapele Sunburst no Nato 650mm steel Spruce Violão dreadnought com corpo amplo e acabamento Sunburst. Volume alto e graves profundos, ideal para country e pop. Tagima Woodstock Dreadnought Natural disponível R$ 899,00 (ou R$ 854,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GF-1R Aço Folk Sunburst disponível R$ 579,90 (ou R$ 550,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Yamaha FG800 Dreadnought Natural disponível R$ 1.299,00 (ou R$ 1.234,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Temporariamente indisponível. Nunca confirme disponibilidade; ofereça as alternativas disponíveis.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.0,
-          "prompt_tokens": 953,
+          "latency_s": 0.02,
+          "prompt_tokens": 964,
           "tools": [
             "detalhar_produto*"
           ]
@@ -119,8 +119,8 @@
           "answer": "empty_category Instrumentos de Sopro (Madeiras) True No momento não há produtos da categoria Instrumentos de Sopro (Madeiras) no catálogo. Informe com transparência e ofereça ajuda com outras categorias.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.0,
-          "prompt_tokens": 702,
+          "latency_s": 0.02,
+          "prompt_tokens": 713,
           "tools": [
             "buscar_produtos*"
           ]
@@ -139,7 +139,7 @@
           "failures": [],
           "llm_calls": 0,
           "latency_s": 0.0,
-          "prompt_tokens": 698,
+          "prompt_tokens": 709,
           "tools": [
             "buscar_produtos*"
           ]
@@ -158,7 +158,7 @@
           "failures": [],
           "llm_calls": 0,
           "latency_s": 0.0,
-          "prompt_tokens": 558,
+          "prompt_tokens": 569,
           "tools": []
         },
         {
@@ -166,8 +166,8 @@
           "answer": "True 8 Ana enviado 2026-02-15 Kala KA-C Concert Mogno 1 349.9 cartão de débito BRJL5544332BR 2026-02-28 True Pedido #8 de 15/02/2026: enviado. Itens: 1× Kala KA-C Concert Mogno. Total: R$ 349,90 (cartão de débito). Rastreio: BRJL5544332BR (Correios ou Jadlog); previsão de entrega 28/02/2026. A previsão de entrega (28/02/2026) já passou: vamos registrar o caso e a equipe vai verificar com a transportadora, com retorno em até 24 horas úteis.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.01,
-          "prompt_tokens": 825,
+          "latency_s": 0.2,
+          "prompt_tokens": 836,
           "tools": [
             "consultar_pedido*"
           ]
@@ -185,8 +185,8 @@
           "answer": "False False Não encontrei um pedido com esses dados. Confira o número do pedido e use o e-mail ou o telefone cadastrados na compra.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.0,
-          "prompt_tokens": 683,
+          "latency_s": 0.04,
+          "prompt_tokens": 694,
           "tools": [
             "consultar_pedido*"
           ]
@@ -204,8 +204,8 @@
           "answer": "Certo, pedido 7! Para confirmar que é você, me informa o e-mail ou o telefone usado na compra?",
           "failures": [],
           "llm_calls": 0,
-          "latency_s": 0.14,
-          "prompt_tokens": 1137,
+          "latency_s": 3.59,
+          "prompt_tokens": 1148,
           "tools": [
             "consultar_politica*"
           ]
@@ -215,8 +215,8 @@
           "answer": "True arrependimento False Arrependimento: até 7 dias corridos após o recebimento, sem justificativa (§4.1). 2026-02-24 Se o produto tiver algum defeito, ainda pode valer a troca por defeito (até 30 dias após a compra) ou a garantia: é só contar o que aconteceu. Fora do prazo: a devolução por arrependimento valia até 24/02/2026 (terminou há 29 dias), então não é mais possível por esse motivo.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.01,
-          "prompt_tokens": 819,
+          "latency_s": 0.07,
+          "prompt_tokens": 830,
           "tools": [
             "verificar_devolucao*"
           ]
@@ -234,8 +234,8 @@
           "answer": "Trocas e devoluções ## 4. Política de Trocas e Devoluções\n\nA Empório da Música segue as diretrizes do Código de Defesa do Consumidor (Lei nº 8.078/90) e oferece\ncondições claras para trocas e devoluções.\n\n### 4.1 Direito de Arrependimento (Compras Online)\n\n- O cliente pode solicitar a devolução em até **7 (sete) dias corridos após o recebimento** do produto, sem\n  necessidade de justificativa.\n- O produto deve estar na embalagem original, sem sinais de uso, com todos os acessórios e manuais.\n- O reembolso é feito na mesma forma de pagamento original em até 10 dias úteis.\n- O frete de devolução é por conta da loja em caso de arrependimento.\n\n### 4.2 Trocas por Defeito\n\n- Produtos com defeito de fabricação podem ser trocados em até **30 (trinta) dias corridos após a compra**.\n- Após os 30 dias, o cliente deve acionar a garantia diretamente com o fabricante. A Empório da Música pode\n  intermediar o processo mediante solicitação.\n- Danos causados por mau uso, quedas, exposição a umidade excessiva ou modificações não autorizadas não são\n  cobertos.\n\n### 4.3 Trocas por Preferência\n\n- Trocas por preferência (cor, modelo, tamanho) são permitidas em até **7 dias**, mediante disponibilidade do\n  produto desejado.\n- O produto deve estar em perfeito estado e na embalagem original.\n- Diferenças de valor são cobradas ou reembolsadas conforme o caso.\n\n### 4.4 Itens Não Elegíveis para Troca\n\n- Instrumentos com personalização ou ajustes sob encomenda (setup, regulagem especial).\n- Produtos adquiridos em promoções de liquidação com aviso explícito de \"venda final\".\n- Boquilhas de instrumentos de sopro, por questões de higiene. Garantia ## 8. Garantia\n\n### 8.1 Garantia Legal\n\nConforme o Código de Defesa do Consumidor, todos os produtos têm garantia legal de **90 (noventa) dias**\ncontra defeitos de fabricação, contados a partir da data de recebimento pelo cliente.\n\n### 8.2 Garantia do Fabricante\n\nAlém da garantia legal, a maioria dos fabricantes oferece garantia própria, que pode variar de 6 meses a\n2 anos. Os prazos e condições específicos estão no certificado de garantia que acompanha cada produto.\n\n### 8.3 O que Não Cobre a Garantia\n\n- Desgaste natural de peças (trastes, cordas, feltros, palhetas de sopro).\n- Danos por mau uso, queda ou exposição a condições climáticas extremas.\n- Modificações ou reparos realizados por terceiros não autorizados.\n- Danos estéticos que não afetem a funcionalidade do instrumento.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.06,
-          "prompt_tokens": 1329,
+          "latency_s": 0.91,
+          "prompt_tokens": 1340,
           "tools": [
             "consultar_politica*"
           ]
@@ -253,8 +253,8 @@
           "answer": "Formas de pagamento e parcelamento ## 3. Formas de Pagamento\n\nFormas aceitas para compras presenciais e online:\n\n| Forma | Condições | Observações |\n|---|---|---|\n| PIX | Pagamento à vista | 5% de desconto sobre o preço de tabela (não vale sobre preço promocional, ver §6.2) |\n| Cartão de Débito | Pagamento à vista | Todas as bandeiras aceitas |\n| Cartão de Crédito | Até 12x sem juros | Parcela mínima conforme a faixa de parcelas (§3.1); a tabela original citava \"Parcela mínima de R$ 100,00\" |\n| Boleto Bancário | Pagamento à vista | Compensação em até 3 dias úteis |\n\n### 3.1 Regras de Parcelamento\n\n- **Até 3x:** sem juros, sem valor mínimo de parcela, exceto parcelas abaixo de R$ 50,00 (não permitidas).\n- **De 4x a 6x:** sem juros, parcela mínima de R$ 80,00.\n- **De 7x a 12x:** sem juros, parcela mínima de R$ 100,00.\n- **Combinação de formas de pagamento** (ex.: PIX + cartão): permitida para compras acima de R$ 2.000,00. Promoções e descontos ## 6. Promoções e Descontos\n\n### 6.1 Tipos de Promoção\n\nA Empório da Música realiza promoções periódicas ao longo do ano. As principais campanhas:\n\n- **Aniversário da Loja (Agosto):** descontos de 10% a 25% em itens selecionados.\n- **Black Friday (Novembro):** descontos de 15% a 30% em todo o catálogo.\n- **Volta às Aulas (Fevereiro):** descontos especiais em instrumentos para estudantes.\n- **Queima de Estoque:** promoções pontuais para renovação de catálogo.\n- **Semana do Músico:** promoções na semana do Dia do Músico (22 de novembro).\n\n### 6.2 Regras de Promoções\n\n- **Cumulatividade:** promoções não são cumulativas. O desconto de PIX (5%) não se aplica sobre preços já\n  promocionais.\n- **Estoque:** promoções estão sujeitas à disponibilidade de estoque. Produtos esgotados durante a promoção\n  não geram direito a rain check (reserva de preço).\n- **Comunicação:** preços promocionais devem sempre ser apresentados junto ao preço original e ao percentual\n  de desconto, para total transparência ao cliente.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.08,
-          "prompt_tokens": 1152,
+          "latency_s": 2.47,
+          "prompt_tokens": 1163,
           "tools": [
             "consultar_politica*"
           ]
@@ -272,8 +272,8 @@
           "answer": "True Motoboy (Campo Grande) 1 a 3 dias úteis 0.0 False Motoboy (Campo Grande): grátis, 1 a 3 dias úteis. Todos os envios têm seguro contra extravio e danos. Entrega por motoboy próprio; a loja liga antes de entregar.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.01,
-          "prompt_tokens": 739,
+          "latency_s": 0.04,
+          "prompt_tokens": 750,
           "tools": [
             "calcular_frete*"
           ]
@@ -291,8 +291,8 @@
           "answer": "Aqui estão os contatos da Empório da Música 🎸 Endereço: Rua 14 de Maio, 3200 — Centro, Campo Grande - MS, CEP 79202-333 · Telefone: (67) 3341-4444 · WhatsApp (atendimento): (67) 3321-4500 · E-mail: contato@emporiodamusica.com.br.",
           "failures": [],
           "llm_calls": 0,
-          "latency_s": 0.06,
-          "prompt_tokens": 1017,
+          "latency_s": 2.28,
+          "prompt_tokens": 1028,
           "tools": [
             "consultar_politica*"
           ]
@@ -362,7 +362,7 @@
           "failures": [],
           "llm_calls": 0,
           "latency_s": 0.0,
-          "prompt_tokens": 613,
+          "prompt_tokens": 624,
           "tools": []
         }
       ]

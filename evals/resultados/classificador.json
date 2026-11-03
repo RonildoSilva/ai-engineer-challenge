@@ -1,8 +1,8 @@
 {
-  "gerado_em": "2026-11-03T12:59:18-03:00",
+  "gerado_em": "2026-11-03T19:09:23-03:00",
   "total": 59,
   "acerto_exato": 0.949,
-  "ms_por_frase": 0.447,
+  "ms_por_frase": 0.817,
   "rotulos": {
     "!dados_de_terceiros": {
       "precisao": 1.0,

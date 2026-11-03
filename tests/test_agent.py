@@ -267,6 +267,14 @@ async def test_accessory_alone_is_a_ready_reply_without_llm(server):
     assert "instrumentos musicais" in turn.answer
 
 
+async def test_instrument_not_carried_is_a_ready_reply(server):
+    """Sanfona: ia ao modelo com 3 tools e a busca devolvia ukuleles; agora é resposta pronta."""
+    (turn,), _ = await run(server, ScriptedLLM([]), "Tem sanfona?")
+    assert turn.llm_calls == 0
+    assert "não trabalha com sanfona" in turn.answer
+    assert "violões" in turn.answer
+
+
 def test_accessory_reply_wording():
     from emporio.agent.prefetch import accessory_reply
 

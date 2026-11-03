@@ -11,7 +11,7 @@ interface da versão local e passa na mesma suíte de testes.
 flowchart TB
     subgraph canal[Canal]
         CLI[emporio chat / ask]
-        WA[REST /chat + SSE<br/>WhatsApp · interface web]
+        WA[REST /chat + SSE<br/>interface web · WhatsApp]
     end
     subgraph host[Host do agente · sem estado entre requisições]
         G[guardrails de entrada] --> R[detecção de assunto] --> PF[pré-busca via MCP]
@@ -84,7 +84,7 @@ flowchart TB
 
 | Medida | Resultado | Onde |
 |---|---|---|
-| Cenários de ponta a ponta | Qwen3-1.7B 18/18 · Bonsai 16/18 · oráculo 18/18 | `evals/resultados/` |
+| Cenários de ponta a ponta | Qwen3-1.7B 18/18 · Bonsai 17/18 (16/18 na 1ª rodada) · oráculo 18/18 | `evals/resultados/` |
 | Classificador de intenção | 95% (88% na 1ª medição) | `evals/resultados/` |
 | Busca | híbrida 90% hit@1 × lexical 70% | `evals/resultados/` |
 | Contratos Postgres/pgvector | 44 testes, ranking idêntico ao SQLite | `tests/test_postgres.py` (CI) |

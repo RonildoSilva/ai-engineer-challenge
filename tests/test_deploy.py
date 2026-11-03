@@ -15,7 +15,8 @@ DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 
 
 def test_dockerfile_base_is_pinned_by_digest():
-    bases = re.findall(r"^FROM\s+(\S+)", DOCKERFILE, flags=re.MULTILINE)
+    web = (ROOT / "deploy/web.Dockerfile").read_text(encoding="utf-8")
+    bases = re.findall(r"^FROM\s+(\S+)", DOCKERFILE + "\n" + web, flags=re.MULTILINE)
     assert bases
     assert all(DIGEST.search(b) for b in bases), bases
 
@@ -47,7 +48,8 @@ def test_compose_third_party_images_are_pinned_and_app_is_built():
 def test_compose_profiles():
     services = COMPOSE["services"]
     default = {n for n, s in services.items() if not s.get("profiles")}
-    assert {"llm", "embeddings", "pipeline", "mcp"} <= default
+    assert {"llm", "embeddings", "pipeline", "mcp", "api", "web"} <= default
+    assert services["web"]["build"]["dockerfile"] == "../deploy/web.Dockerfile"
     assert {n for n, s in services.items() if "scale" in s.get("profiles", [])} == {
         "postgres", "db-load", "mcp-scale",
     }  # fmt: skip
