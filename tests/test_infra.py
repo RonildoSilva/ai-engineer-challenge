@@ -227,3 +227,11 @@ def test_setup_ends_with_quick_check_and_ci_skips_it():
     assert "uv run emporio chat" in setup  # próximo passo indicado ao final
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     assert "SKIP_CHECK=1 ./scripts/setup.sh" in ci
+
+
+def test_start_parallel_slots_are_explicit():
+    """Chat: 1 slot por padrão em CPU (configurável); embeddings: sempre 1."""
+    script = (SCRIPTS / "start_llamafile.sh").read_text()
+    assert 'PARALLEL="${PARALLEL:-1}"' in script
+    assert '-np "$PARALLEL"' in script
+    assert "-np 1)" in script  # embeddings

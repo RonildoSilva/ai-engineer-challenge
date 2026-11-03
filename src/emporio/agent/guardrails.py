@@ -22,9 +22,12 @@ que deixar o modelo, já instruído pela persona, recusar com gentileza.
 
 from __future__ import annotations
 
+import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 from emporio.data.rules import normalize
 
@@ -183,3 +186,71 @@ def recites_prompt(answer: str, system_prompt: str) -> bool:
     grams = {" ".join(words[i : i + LEAK_NGRAM]) for i in range(len(words) - LEAK_NGRAM + 1)}
     a = normalize(answer).split()
     return any(" ".join(a[i : i + LEAK_NGRAM]) in grams for i in range(len(a) - LEAK_NGRAM + 1))
+
+
+# ------------------------------------------------------------------------------ status sem fonte
+
+# "seu pedido foi enviado", "o pedido 8 já foi entregue", "pedido #8 está a caminho"
+_ORDER_STATUS = re.compile(
+    r"\b(?:seu|sua|o|a)?\s*(?:pedido|compra|encomenda)\b(?:\s*(?:n[ºo°.]?\s*)?#?\d+)?[^.!?\n]{0,50}?"
+    r"\b(?:foi |ja foi |esta |ja esta |segue |)"
+    r"(?:enviad[oa]|entregue|despachad[oa]|cancelad[oa]|confirmad[oa]|a caminho|em transito|"
+    r"saiu para entrega|em separacao|aguardando pagamento)\b"
+)
+_AVAILABLE = re.compile(
+    r"\b(?:esta disponivel|ja esta disponivel|esta disponivel para|temos em estoque|"
+    r"tem em estoque|temos (?:ele|ela|esse|essa)|em estoque|pronta entrega|"
+    r"disponivel para (?:compra|entrega|venda))\b"
+)
+_NEGATION = re.compile(r"\b(?:nao|indisponivel|esgotad|descontinuad|em breve|sem estoque)")
+
+
+def _tool_payloads(traces: list[Any]) -> list[tuple[str, dict[str, Any]]]:
+    out = []
+    for t in traces:
+        try:
+            data = json.loads(t.output)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(data, dict):
+            out.append((t.name, data))
+    return out
+
+
+def unverified_order_status(answer: str, traces: list[Any]) -> str | None:
+    """Status de pedido afirmado sem uma consulta com o titular verificado neste turno."""
+    if not (m := _ORDER_STATUS.search(_fold(answer))):
+        return None
+    verified = any(
+        name in {"consultar_pedido", "verificar_devolucao"} and data.get("verificado") is True
+        for name, data in _tool_payloads(traces)
+    )
+    return None if verified else m.group(0).strip()
+
+
+def false_availability(answer: str, traces: list[Any]) -> str | None:
+    """Disponibilidade afirmada para um produto que as tools disseram estar indisponível.
+
+    Olha só as frases que citam o produto: "o Tagima Woodstock (alternativa) está disponível" é
+    legítimo; "o Giannini GF-3D já está disponível", com ele esgotado, não (o Bonsai disse isso).
+    """
+    unavailable = []
+    for _, data in _tool_payloads(traces):
+        products = [data.get("produto"), *data.get("candidatos", []), *data.get("produtos", [])]
+        for p in products:
+            if not isinstance(p, dict) or not p.get("nome"):
+                continue
+            if not _fold(str(p.get("disponibilidade", ""))).startswith("disponivel"):
+                unavailable.append(_fold(p["nome"]))
+    for product in unavailable:
+        key = " ".join(product.split()[:2])  # marca + modelo ("giannini gf-3d")
+        for sentence in re.split(r"[.!?\n]+", _fold(answer)):
+            if key in sentence and _AVAILABLE.search(sentence) and not _NEGATION.search(sentence):
+                return sentence.strip()
+    return None
+
+
+def _fold(text: str) -> str:
+    """Minúsculas sem acento, pontuação preservada (nomes como "GF-3D" continuam iguais)."""
+    nfkd = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).lower()

@@ -41,7 +41,7 @@ from pydantic import ValidationError
 from emporio.agent.agent import Agent, Turn
 from emporio.agent.budget import ContextBudget
 from emporio.agent.chat import ChatSession, Transcript
-from emporio.agent.history import HistoryStore
+from emporio.agent.history import build_history_store
 from emporio.agent.llm import (
     LLMClient,
     LLMConfigError,
@@ -464,6 +464,7 @@ def _run_agent(settings: Settings, profile_name: str | None, body) -> int:
 
 
 def _print_trace(turn: Turn) -> None:
+    print(f"— turno {turn.request_id}", file=sys.stderr)
     if turn.llm_calls == 0 and not turn.fallback:
         print(f"— resposta pronta, sem LLM ({turn.latency_s:.2f} s)", file=sys.stderr)
     else:
@@ -503,7 +504,7 @@ CHAT_HELP = "Comandos: /nova (outra conversa), /sessoes, /ajuda, /sair (ou Ctrl+
 
 
 def _chat_cmd(args: argparse.Namespace, settings: Settings) -> int:
-    store = HistoryStore(settings.history_db)
+    store = build_history_store(settings)
     if args.list:
         for s in store.sessions():
             print(f"{s.id}  {s.updated_at}  {s.profile:<10} {s.messages:>3} mensagens")

@@ -285,9 +285,13 @@ class _Planner:
                 self.price = (float(p["preco_final"]), bool(p.get("promocao")))
                 self.pf.product_price = self.price
             elif data.get("situacao") == "not_found" and not r.has(Intent.CATALOGO):
-                await self.call("buscar_produtos", {"texto": text, "limite": limit})
+                await self.call(
+                    "buscar_produtos", {"texto": text, "limite": limit, "detalhe": "resumo"}
+                )
         if r.has(Intent.CATALOGO) and not found:
-            await self.call("buscar_produtos", {"texto": text, "limite": limit})
+            await self.call(
+                "buscar_produtos", {"texto": text, "limite": limit, "detalhe": "resumo"}
+            )
 
     async def orders(self) -> None:
         r, s = self.route, self.route.slots

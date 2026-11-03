@@ -70,10 +70,15 @@ class Settings(BaseSettings):
     store_backend: Literal["sqlite", "postgres"] = "sqlite"
     vector_backend: Literal["sqlite", "pgvector"] = "sqlite"
     database_url: str | None = None  # ex.: postgresql://emporio:emporio@127.0.0.1:5432/emporio
+    history_backend: Literal["sqlite", "postgres"] = "sqlite"  # histórico de conversas
 
     @model_validator(mode="after")
     def _database_url_required(self) -> Settings:
-        uses_pg = self.store_backend == "postgres" or self.vector_backend == "pgvector"
+        uses_pg = (
+            self.store_backend == "postgres"
+            or self.vector_backend == "pgvector"
+            or self.history_backend == "postgres"
+        )
         if uses_pg and not self.database_url:
             raise ValueError(
                 "STORE_BACKEND=postgres ou VECTOR_BACKEND=pgvector exigem DATABASE_URL"

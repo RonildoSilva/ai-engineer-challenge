@@ -17,8 +17,9 @@ from pathlib import Path
 from typing import Any
 
 from emporio.agent.agent import Agent, Turn
-from emporio.agent.history import HistoryStore, mask_pii
+from emporio.agent.history import mask_pii
 from emporio.agent.router import route
+from emporio.ports import HistoryStore
 
 
 def turn_meta(turn: Turn) -> dict[str, Any]:
@@ -34,6 +35,7 @@ def turn_meta(turn: Turn) -> dict[str, Any]:
         "guardrail": turn.guardrail,
         "escalated": turn.escalated,
         "redacted": len(turn.redacted),
+        "request_id": turn.request_id,
     }
 
 

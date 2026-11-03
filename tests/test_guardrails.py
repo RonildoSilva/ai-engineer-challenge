@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from emporio.agent.agent import FALLBACK_ANSWER
@@ -11,8 +13,10 @@ from emporio.agent.guardrails import (
     REPLIES,
     Block,
     check_input,
+    false_availability,
     recites_prompt,
     redact_contacts,
+    unverified_order_status,
 )
 from emporio.agent.router import detect_intents
 from emporio.mcp_server.persona import persona_prompt
@@ -271,3 +275,75 @@ def test_guidelines_and_curation_notes_are_not_given_to_the_model_as_data():
     out = json.loads(_condense("consultar_politica", result, ContextBudget(8192, 512)))
     assert [s["titulo"] for s in out["secoes"]] == ["Trocas e devoluções"]
     assert out["secoes"][0]["conteudo"] == "7 dias.\n\nFim."  # sem a nota de curadoria
+
+
+# ============================================================================ status sem fonte
+
+
+def trace(name: str, output: dict) -> object:
+    from emporio.agent.agent import ToolTrace
+
+    return ToolTrace(name, {}, ok=True, output=json.dumps(output, ensure_ascii=False), latency_s=0)
+
+
+GF3D = trace("detalhar_produto", {"situacao": "found", "produto": {
+    "nome": "Giannini GF-3D Dreadnought Sunburst",
+    "disponibilidade": "esgotado (sem estoque no momento)"}})  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "O violão Giannini GF-3D já está disponível. O preço é R$ 799,90.",  # o Bonsai disse isso
+        "Temos em estoque o Giannini GF-3D!",
+    ],
+)
+def test_availability_contrary_to_the_data_is_caught(answer):
+    assert false_availability(answer, [GF3D])
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "O Giannini GF-3D não está disponível no momento.",
+        "O Giannini GF-3D está esgotado. O Tagima Woodstock está disponível como alternativa.",
+        "Infelizmente o Giannini GF-3D está indisponível.",
+    ],
+)
+def test_correct_availability_passes(answer):
+    assert false_availability(answer, [GF3D]) is None
+
+
+def test_order_status_needs_a_verified_lookup():
+    claim = "Seu pedido foi enviado e chega amanhã."
+    assert unverified_order_status(claim, [])
+    not_verified = trace("consultar_pedido", {"verificado": False, "resposta": "não conferem"})
+    assert unverified_order_status(claim, [not_verified])
+    verified = trace("consultar_pedido", {"verificado": True, "status": "enviado"})
+    assert unverified_order_status(claim, [verified]) is None
+    # regra geral sobre pedidos não é afirmação de status
+    assert unverified_order_status("O código de rastreio é enviado por e-mail.", []) is None
+    assert unverified_order_status("Me passa o número do pedido?", []) is None
+
+
+async def test_false_availability_gets_one_correction_then_safe_answer(server):  # noqa: F811
+    wrong = "O violão Giannini GF-3D já está disponível. Custa R$ 799,90."
+    llm = ScriptedLLM([answer(wrong), answer("O Giannini GF-3D está esgotado no momento.")])
+    (turn,), _ = await run(server, llm, "tem o violão Giannini GF-3D?")
+    assert turn.retried is not None
+    assert "disponibilidade" in turn.retried
+    assert "esgotado" in llm.seen[1][-1]["content"] or "disponível" in llm.seen[1][-1]["content"]
+    assert turn.answer == "O Giannini GF-3D está esgotado no momento."
+
+    llm = ScriptedLLM([answer(wrong), answer(wrong)])
+    (turn,), _ = await run(server, llm, "tem o violão Giannini GF-3D?")
+    assert turn.answer == FALLBACK_ANSWER
+
+
+async def test_order_status_without_lookup_is_corrected(server):  # noqa: F811
+    llm = ScriptedLLM(
+        [answer("Seu pedido já foi entregue!"), answer("Me passa o número do pedido?")]
+    )
+    (turn,), _ = await run(server, llm, "vocês entregam em Dourados?")
+    assert "status de pedido" in (turn.retried or "")
+    assert turn.answer == "Me passa o número do pedido?"

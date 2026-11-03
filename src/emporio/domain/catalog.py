@@ -296,26 +296,13 @@ class CatalogService:
                     note="A pergunta é sobre uma categoria, não sobre um modelo: use a busca de "
                     "produtos (com filtros de categoria e preço) e apresente as opções.",
                 )
-            scored = self._fuzzy(query)
-            top = scored[0][0] if scored else 0.0
-            second = scored[1][0] if len(scored) > 1 else 0.0
-            close = [p for s, p in scored[:3] if s >= max(AMBIGUOUS_SCORE, top - 15)]
-            if (top >= FOUND_SCORE and top - second >= FOUND_MARGIN) or (
-                top >= SINGLE_CANDIDATE_SCORE and len(close) == 1
-            ):  # um único candidato próximo: não faz sentido perguntar "qual deles?"
-                product = scored[0][1]
-            elif top >= AMBIGUOUS_SCORE:
-                return ProductDetail(
-                    "ambiguous",
-                    candidates=[self.view(p) for p in close],
-                    note="Mais de um produto corresponde; pergunte ao cliente qual deles.",
-                )
-            else:
-                return ProductDetail(
-                    "not_found",
-                    note="Produto não encontrado no catálogo. Não invente: pergunte mais detalhes "
-                    "ou ofereça buscar por categoria.",
-                )
+            # código de modelo citado ("GF-3D", "GD20") e de um produto só: é ele, sem fuzzy
+            product = self._by_model_code(query)
+            if product is None:
+                found = self._fuzzy_pick(query)
+                if isinstance(found, ProductDetail):
+                    return found
+                product = found
         alternatives = [] if product.is_sellable else self.alternatives(product)
         return ProductDetail(
             "found",
@@ -368,6 +355,51 @@ class CatalogService:
         return sorted(
             candidates, key=lambda p: (order.get(f"p{p.product_id}", len(order)), p.price_brl)
         )
+
+    def _fuzzy_pick(self, query: str) -> Product | ProductDetail:
+        """Vencedor claro do fuzzy, ou o resultado ambíguo / não encontrado."""
+        scored = self._fuzzy(query)
+        top = scored[0][0] if scored else 0.0
+        second = scored[1][0] if len(scored) > 1 else 0.0
+        close = [p for s, p in scored[:3] if s >= max(AMBIGUOUS_SCORE, top - 15)]
+        if (top >= FOUND_SCORE and top - second >= FOUND_MARGIN) or (
+            top >= SINGLE_CANDIDATE_SCORE and len(close) == 1
+        ):  # um único candidato próximo: não faz sentido perguntar "qual deles?"
+            return scored[0][1]
+        if top >= AMBIGUOUS_SCORE:
+            return ProductDetail(
+                "ambiguous",
+                candidates=[self.view(p) for p in close],
+                note="Mais de um produto corresponde; pergunte ao cliente qual deles.",
+            )
+        return ProductDetail(
+            "not_found",
+            note="Produto não encontrado no catálogo. Não invente: pergunte mais detalhes "
+            "ou ofereça buscar por categoria.",
+        )
+
+    def _by_model_code(self, query: str) -> Product | None:
+        """Produto cujo código de modelo aparece na pergunta, se for um só.
+
+        Código = palavras do nome com dígito, junto da palavra anterior quando o nome as separa
+        ("Giannini GF-3D" → "gf 3d"; "Takamine GD20" → "gd20"). O fuzzy sozinho achava o GF-3D
+        parecido demais com o GNF-3 e pedia para o cliente escolher.
+        """
+        q = f" {normalize(query)} "
+        hits = []
+        for p in self._all:
+            words = p.name_normalized.split()
+            codes = set()
+            for i, w in enumerate(words):
+                if any(c.isdigit() for c in w):
+                    codes.add(w)
+                    if i > 0 and not any(c.isdigit() for c in words[i - 1]):
+                        codes.add(f"{words[i - 1]} {w}")
+            # só códigos com letra e dígito, ou pares ("gf 3d"): "40" sozinho casaria com preços
+            strong = {c for c in codes if " " in c or any(ch.isalpha() for ch in c)}
+            if any(f" {c} " in q for c in strong if len(c.replace(" ", "")) >= 3):  # noqa: PLR2004
+                hits.append(p)
+        return hits[0] if len(hits) == 1 else None
 
     def _fuzzy(self, query: str) -> list[tuple[float, Product]]:
         # "Quanto custa o Takamine GD20?" → "takamine gd20": palavras de pedido diluem o nome

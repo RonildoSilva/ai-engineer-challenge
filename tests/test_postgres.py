@@ -19,6 +19,7 @@ from emporio.adapters.vector_sqlite import SqliteVectorIndex
 from emporio.domain.policies import PolicyStore
 from emporio.retrieval.documents import build_documents
 from tests.conftest import make_settings
+from tests.contract.history_contract import HistoryContract
 from tests.contract.repository_contract import RepositoryContract
 from tests.contract.retriever_contract import RetrieverContract
 
@@ -82,6 +83,41 @@ class TestHybridRetrieverOverPgVector(RetrieverContract):
         lexical = LexicalRetriever(build_documents(pg_repo, policies),
                                    PolicyStore.from_json(policies))  # fmt: skip
         return HybridRetriever(lexical, pg_index, HashingEmbedder())
+
+
+@pytest.fixture
+def pg_history(pg_dsn):
+    """Histórico num schema só dele (as tabelas são criadas pelo próprio adaptador)."""
+    import psycopg
+
+    from emporio.adapters.history_postgres import PostgresHistoryStore
+
+    schema = f"emporio_hist_{secrets.token_hex(4)}"
+    with psycopg.connect(DSN, autocommit=True) as admin:
+        admin.execute(f'CREATE SCHEMA "{schema}"')
+    base = DSN or ""
+    dsn = f"{base}{'&' if '?' in base else '?'}options=-csearch_path%3D{schema}"
+    store = PostgresHistoryStore(dsn)
+    yield store
+    store.close()
+    with psycopg.connect(DSN, autocommit=True) as admin:
+        admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+
+
+class TestPostgresHistoryStore(HistoryContract):
+    @pytest.fixture
+    def store(self, pg_history):
+        return pg_history
+
+
+def test_history_backend_postgres_is_selected_by_configuration(pg_dsn):
+    from emporio.adapters.history_postgres import PostgresHistoryStore
+    from emporio.agent.history import build_history_store
+
+    settings = make_settings(history_backend="postgres", database_url=pg_dsn)
+    store = build_history_store(settings)
+    assert isinstance(store, PostgresHistoryStore)
+    store.close()
 
 
 # ============================================================================ equivalência

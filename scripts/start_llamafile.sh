@@ -7,7 +7,7 @@
 #   MODE=embedding ./scripts/start_llamafile.sh       # embeddings: embeddinggemma-300m em :8081
 #   MODEL=models/outro/x.gguf ALIAS=outro PORT=8082 ./scripts/start_llamafile.sh
 #
-# Variáveis: MODE (chat|embedding), RUNTIME, MODEL, ALIAS, HOST, PORT, CTX, THREADS, GPU,
+# Variáveis: MODE (chat|embedding), RUNTIME, MODEL, ALIAS, HOST, PORT, CTX, THREADS, PARALLEL, GPU,
 #            REASONING (só chat)
 # Artefatos: ./scripts/download_model.sh (ver models/manifest.tsv)
 set -euo pipefail
@@ -37,10 +37,14 @@ case "$MODE" in
     # GPU=auto usa a GPU se existir; só use depois de validar a saída na sua placa.
     GPU="${GPU:-disable}"
     REASONING="${REASONING:-off}"
+    # Slots paralelos: em CPU, 1 (uma resposta já satura os núcleos; mais slots só dividem o
+    # contexto e a memória, e as requisições esperam na fila do servidor). Com GPU, aumente
+    # (ex.: PARALLEL=4) para atender conversas simultâneas.
+    PARALLEL="${PARALLEL:-1}"
     # --jinja: template de chat do modelo (necessário para tool_calls estruturados)
     # --reasoning: A/B no Bonsai: mesmo acerto de tool calling, off é ~20% mais rápido
     # --temp/--top-p/--top-k: defaults de amostragem recomendados no GGUF do Bonsai
-    MODE_ARGS=(--jinja --reasoning "$REASONING" --temp 0.5 --top-p 0.85 --top-k 20)
+    MODE_ARGS=(--jinja --reasoning "$REASONING" --temp 0.5 --top-p 0.85 --top-k 20 -np "$PARALLEL")
     ;;
   embedding)
     MODEL="${MODEL:-$ROOT/models/embeddinggemma-300m/embeddinggemma-300M-Q8_0.gguf}"
@@ -67,7 +71,7 @@ for f in "$RUNTIME" "$MODEL"; do
 done
 [[ -x "$RUNTIME" ]] || chmod +x "$RUNTIME"
 
-echo "Subindo $(basename "$MODEL") [$MODE] como '$ALIAS' em http://$HOST:$PORT/v1 (ctx=$CTX, gpu=$GPU, threads=$THREADS)"
+echo "Subindo $(basename "$MODEL") [$MODE] como '$ALIAS' em http://$HOST:$PORT/v1 (ctx=$CTX, gpu=$GPU, threads=$THREADS, parallel=${PARALLEL:-1})"
 # exec via bash: o llamafile é um binário APE e o bash o executa pelo sh quando o kernel recusa
 exec "$RUNTIME" -m "$MODEL" --server \
   --host "$HOST" --port "$PORT" \

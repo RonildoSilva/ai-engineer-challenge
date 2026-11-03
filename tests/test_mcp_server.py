@@ -212,6 +212,29 @@ async def test_consultar_politica(server):
     assert "Não invente" in empty["orientacao"]
 
 
+async def test_detalhe_resumo_is_cheaper_and_points_to_the_resource(server):
+    """`detalhe="resumo"`: o cliente recebe o essencial e busca o resto só se couber."""
+    full = (await call(server, "buscar_produtos", texto="violões até R$1000")).structured_content
+    short = (
+        await call(server, "buscar_produtos", texto="violões até R$1000", detalhe="resumo")
+    ).structured_content
+    assert [x["id"] for x in short["produtos"]] == [x["id"] for x in full["produtos"]]
+    assert all(x["especificacoes"] for x in full["produtos"])
+    assert not any(x["especificacoes"] or x.get("descricao") for x in short["produtos"])
+    assert len(json.dumps(short)) < len(json.dumps(full))
+
+    pol = (
+        await call(server, "consultar_politica", pergunta="posso devolver?", detalhe="resumo")
+    ).structured_content
+    sec = pol["secoes"][0]
+    assert sec.get("conteudo") is None
+    assert sec["uri"] == "politicas://trocas_devolucoes"
+    assert sec["tokens_estimados"] > 0
+    async with Client(server) as c:  # o texto completo continua acessível pelo resource
+        body = (await c.read_resource(sec["uri"])).contents[0].text
+    assert "7 (sete) dias" in body
+
+
 # ============================================================================ erros
 
 

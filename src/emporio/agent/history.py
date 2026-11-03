@@ -18,10 +18,12 @@ import re
 import secrets
 import sqlite3
 import threading
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from emporio.config import Settings
+from emporio.ports import HistoryStore, SessionInfo
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -61,17 +63,11 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds")
 
 
-@dataclass(frozen=True)
-class SessionInfo:
-    id: str
-    profile: str
-    created_at: str
-    updated_at: str
-    messages: int
+class SqliteHistoryStore:
+    """Histórico em SQLite (padrão).
 
-
-class HistoryStore:
-    """Acesso ao histórico. Uma conexão por thread (o agente roda o LLM em outra thread)."""
+    Uma conexão por thread (o agente roda o LLM em outra thread).
+    """
 
     def __init__(self, path: Path):
         self.path = path
@@ -180,3 +176,12 @@ def _without_blocked(rows: list[tuple[str, str, str]]) -> list[tuple[str, str, s
             continue
         out.append(row)
     return out
+
+
+def build_history_store(settings: Settings) -> HistoryStore:
+    """SQLite em data/processed/history.db (padrão) ou Postgres (`HISTORY_BACKEND=postgres`)."""
+    if settings.history_backend == "postgres":
+        from emporio.adapters.history_postgres import PostgresHistoryStore  # noqa: PLC0415 (extra)
+
+        return PostgresHistoryStore(settings.database_url or "")
+    return SqliteHistoryStore(settings.history_db)

@@ -1,5 +1,5 @@
 {
-  "gerado_em": "2026-11-03T17:04:27-03:00",
+  "gerado_em": "2026-11-03T17:24:16-03:00",
   "perfil": "oraculo",
   "modelo": "nenhum (devolve os dados)",
   "cenarios": 18,
@@ -10,7 +10,7 @@
   "turnos_com_llm": 12,
   "latencia_llm_p50_s": 0.0,
   "latencia_llm_p95_s": 0.1,
-  "prompt_tokens_medio": 934,
+  "prompt_tokens_medio": 885,
   "cenarios_detalhe": [
     {
       "id": "preco_gd20",
@@ -23,7 +23,7 @@
           "answer": "found Takamine GD20 Dreadnought Natural disponível R$ 2.199,00 (ou R$ 2.089,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Sapele Natural no Mogno 650mm steel Cedro Sólido Violão dreadnought Takamine com tampo sólido em cedro. Excelente para fingerstyle com timbre quente e definido.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.01,
+          "latency_s": 0.02,
           "prompt_tokens": 758,
           "tools": [
             "detalhar_produto*"
@@ -42,8 +42,8 @@
           "answer": "ok Violões 1000.0 True Tagima Memphis AC-39 Nylon Natural disponível R$ 429,90 (ou R$ 408,40 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Rozini RC-104 Nylon Estudante disponível R$ 459,90 (ou R$ 436,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Shelby SN-100 Folk Aço Preto disponível R$ 549,00 (ou R$ 521,55 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GF-1R Aço Folk Sunburst disponível R$ 579,90 (ou R$ 550,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Yamaha C40 Nylon Natural disponível R$ 599,90 (ou R$ 569,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção)",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.01,
-          "prompt_tokens": 920,
+          "latency_s": 0.02,
+          "prompt_tokens": 926,
           "tools": [
             "buscar_produtos*"
           ]
@@ -78,14 +78,13 @@
       "turnos": [
         {
           "user": "quanto está o ukulele Kalani KAL-700T?",
-          "answer": "ambiguous Kalani KAL-700T Tenor Natural disponível R$ 323,10 na promoção Oferta Especial (10% de desconto sobre R$ 359,00); o desconto do PIX não se soma à promoção Oferta Especial (10%) Kalani KAL-300S Soprano Natural disponível R$ 179,90 (ou R$ 170,91 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Kalani KAL-500C Concert Elétrico Natural disponível R$ 479,00 (ou R$ 455,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Mais de um produto corresponde; pergunte ao cliente qual deles. ok Ukuleles True Kalani KAL-700T Tenor Natural disponível R$ 323,10 na promoção Oferta Especial (10% de desconto sobre R$ 359,00); o desconto do PIX não se soma à promoção Oferta Especial (10%) Kalani KAL-300S Soprano Natural disponível R$ 179,90 (ou R$ 170,91 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Kalani KAL-500C Concert Elétrico Natural disponível R$ 479,00 (ou R$ 455,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Kala KA-C Concert Mogno disponível R$ 349,90 (ou R$ 332,40 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Kala KA-T Tenor Mogno disponível R$ 449,90 (ou R$ 427,40 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção)",
+          "answer": "found Kalani KAL-700T Tenor Natural disponível R$ 323,10 na promoção Oferta Especial (10% de desconto sobre R$ 359,00); o desconto do PIX não se soma à promoção Oferta Especial (10%) Sapele Natural no Nato 432mm nylon Spruce Ukulele tenor Kalani com corpo em Sapele e tampo em Spruce. Boa relação custo-benefício para quem busca um instrumento maior.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.1,
-          "prompt_tokens": 1158,
+          "latency_s": 0.0,
+          "prompt_tokens": 768,
           "tools": [
-            "detalhar_produto*",
-            "buscar_produtos*"
+            "detalhar_produto*"
           ]
         }
       ]
@@ -98,14 +97,13 @@
       "turnos": [
         {
           "user": "tem o violão Giannini GF-3D?",
-          "answer": "ambiguous Giannini GF-3D Dreadnought Sunburst esgotado (sem estoque no momento) R$ 799,90 (ou R$ 759,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GNF-3 CEQ Elétrico Nylon Natural disponível R$ 1.049,00 (ou R$ 996,55 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GF-1R Aço Folk Sunburst disponível R$ 579,90 (ou R$ 550,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Mais de um produto corresponde; pergunte ao cliente qual deles. ok Violões True Giannini GNF-3 CEQ Elétrico Nylon Natural disponível R$ 1.049,00 (ou R$ 996,55 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GF-1R Aço Folk Sunburst disponível R$ 579,90 (ou R$ 550,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GWNE-7 7 Cordas Nylon Natural disponível R$ 1.149,00 (ou R$ 1.091,55 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GN-15 Nylon Cedr Natural disponível R$ 689,00 (ou R$ 654,55 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Takamine GC5CE Elétrico Nylon Natural disponível R$ 3.299,00 (ou R$ 3.134,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção)",
+          "answer": "found Giannini GF-3D Dreadnought Sunburst esgotado (sem estoque no momento) R$ 799,90 (ou R$ 759,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Sapele Sunburst no Nato 650mm steel Spruce Violão dreadnought com corpo amplo e acabamento Sunburst. Volume alto e graves profundos, ideal para country e pop. Tagima Woodstock Dreadnought Natural disponível R$ 899,00 (ou R$ 854,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GF-1R Aço Folk Sunburst disponível R$ 579,90 (ou R$ 550,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Yamaha FG800 Dreadnought Natural disponível R$ 1.299,00 (ou R$ 1.234,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Temporariamente indisponível. Nunca confirme disponibilidade; ofereça as alternativas disponíveis.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.09,
-          "prompt_tokens": 1157,
+          "latency_s": 0.0,
+          "prompt_tokens": 953,
           "tools": [
-            "detalhar_produto*",
-            "buscar_produtos*"
+            "detalhar_produto*"
           ]
         }
       ]
@@ -122,7 +120,7 @@
           "failures": [],
           "llm_calls": 1,
           "latency_s": 0.0,
-          "prompt_tokens": 696,
+          "prompt_tokens": 702,
           "tools": [
             "buscar_produtos*"
           ]
@@ -206,7 +204,7 @@
           "answer": "Certo, pedido 7! Para confirmar que é você, me informa o e-mail ou o telefone usado na compra?",
           "failures": [],
           "llm_calls": 0,
-          "latency_s": 0.1,
+          "latency_s": 0.14,
           "prompt_tokens": 1137,
           "tools": [
             "consultar_politica*"
@@ -255,7 +253,7 @@
           "answer": "Formas de pagamento e parcelamento ## 3. Formas de Pagamento\n\nFormas aceitas para compras presenciais e online:\n\n| Forma | Condições | Observações |\n|---|---|---|\n| PIX | Pagamento à vista | 5% de desconto sobre o preço de tabela (não vale sobre preço promocional, ver §6.2) |\n| Cartão de Débito | Pagamento à vista | Todas as bandeiras aceitas |\n| Cartão de Crédito | Até 12x sem juros | Parcela mínima conforme a faixa de parcelas (§3.1); a tabela original citava \"Parcela mínima de R$ 100,00\" |\n| Boleto Bancário | Pagamento à vista | Compensação em até 3 dias úteis |\n\n### 3.1 Regras de Parcelamento\n\n- **Até 3x:** sem juros, sem valor mínimo de parcela, exceto parcelas abaixo de R$ 50,00 (não permitidas).\n- **De 4x a 6x:** sem juros, parcela mínima de R$ 80,00.\n- **De 7x a 12x:** sem juros, parcela mínima de R$ 100,00.\n- **Combinação de formas de pagamento** (ex.: PIX + cartão): permitida para compras acima de R$ 2.000,00. Promoções e descontos ## 6. Promoções e Descontos\n\n### 6.1 Tipos de Promoção\n\nA Empório da Música realiza promoções periódicas ao longo do ano. As principais campanhas:\n\n- **Aniversário da Loja (Agosto):** descontos de 10% a 25% em itens selecionados.\n- **Black Friday (Novembro):** descontos de 15% a 30% em todo o catálogo.\n- **Volta às Aulas (Fevereiro):** descontos especiais em instrumentos para estudantes.\n- **Queima de Estoque:** promoções pontuais para renovação de catálogo.\n- **Semana do Músico:** promoções na semana do Dia do Músico (22 de novembro).\n\n### 6.2 Regras de Promoções\n\n- **Cumulatividade:** promoções não são cumulativas. O desconto de PIX (5%) não se aplica sobre preços já\n  promocionais.\n- **Estoque:** promoções estão sujeitas à disponibilidade de estoque. Produtos esgotados durante a promoção\n  não geram direito a rain check (reserva de preço).\n- **Comunicação:** preços promocionais devem sempre ser apresentados junto ao preço original e ao percentual\n  de desconto, para total transparência ao cliente.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.06,
+          "latency_s": 0.08,
           "prompt_tokens": 1152,
           "tools": [
             "consultar_politica*"

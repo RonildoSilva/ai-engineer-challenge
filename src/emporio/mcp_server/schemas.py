@@ -119,7 +119,8 @@ class SecaoPolitica(BaseModel):
     titulo: str
     tipo: str = Field(description="policy (regra) | guideline (instrução ao atendente)")
     tokens_estimados: int
-    conteudo: str
+    conteudo: str | None = Field(default=None, description="ausente com detalhe='resumo'")
+    uri: str = Field(description="resource MCP com o texto da seção")
 
 
 class ConsultaPolitica(BaseModel):

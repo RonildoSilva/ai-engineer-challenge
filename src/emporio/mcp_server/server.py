@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from functools import wraps
+from typing import Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError
@@ -27,7 +28,7 @@ from emporio.domain.catalog import CatalogService, ProductView, detect_category
 from emporio.domain.orders import OrderService
 from emporio.domain.policies import PolicyStore
 from emporio.domain.store_hours import SPECIAL_HOURS_NOTE, store_status, weekly_hours
-from emporio.log import get_logger
+from emporio.log import current_request_id, get_logger, request_context
 from emporio.mcp_server import schemas as out
 from emporio.mcp_server.persona import persona_prompt
 from emporio.retrieval.factory import build_repository, build_retriever
@@ -44,35 +45,40 @@ consultar_pedido e verificar_devolucao exigem número do pedido + e-mail ou tele
 simular_pagamento, calcular_frete e status_loja fazem as contas. Todas são somente leitura."""
 
 
+def _call_logged(fn: Callable[..., Any], args: tuple, kwargs: dict[str, Any]) -> Any:
+    safe = {k: ("***" if k in PII_ARGS else v) for k, v in kwargs.items()}
+    t0 = time.perf_counter()
+    try:
+        result = fn(*args, **kwargs)
+    except ToolError as e:
+        log.info("tool recusada", extra={"tool": fn.__name__, "params": safe, "reason": str(e)})
+        raise
+    except Exception:
+        log.exception("erro inesperado na tool", extra={"tool": fn.__name__, "params": safe})
+        raise
+    log.info(
+        "tool executada",
+        extra={"tool": fn.__name__, "params": safe, "ms": round((time.perf_counter() - t0) * 1000)},
+    )
+    return result
+
+
 def _logged[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
     """Log estruturado por chamada (nome, duração, resultado), sem dados pessoais."""
 
     @wraps(fn)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-        safe = {k: ("***" if k in PII_ARGS else v) for k, v in kwargs.items()}
-        t0 = time.perf_counter()
-        try:
-            result = fn(*args, **kwargs)
-        except ToolError as e:
-            log.info("tool recusada", extra={"tool": fn.__name__, "params": safe, "reason": str(e)})
-            raise
-        except Exception:
-            log.exception("erro inesperado na tool", extra={"tool": fn.__name__, "params": safe})
-            raise
-        log.info(
-            "tool executada",
-            extra={
-                "tool": fn.__name__,
-                "params": safe,
-                "ms": round((time.perf_counter() - t0) * 1000),
-            },
-        )
-        return result
+        # cada chamada de tool tem seu id nos logs (o do turno, se vier do mesmo contexto)
+        with request_context(current_request_id(), prefix="mcp-"):
+            return _call_logged(fn, args, kwargs)
 
     return wrapper
 
 
-def _product(v: ProductView) -> out.Produto:
+Detalhe = Literal["resumo", "completo"]
+
+
+def _product(v: ProductView, *, full: bool = True) -> out.Produto:
     p, price = v.product, v.price
     promo = f"{price.promotion.label} ({price.promotion.percent}%)" if price.promotion else None
     return out.Produto(
@@ -85,8 +91,8 @@ def _product(v: ProductView) -> out.Produto:
         promocao=promo,
         preco_pix=price.pix_price,
         resumo_preco=price.describe(),
-        especificacoes=p.specs,
-        descricao=p.description,
+        especificacoes=p.specs if full else {},
+        descricao=p.description if full else None,
     )
 
 
@@ -121,11 +127,14 @@ def build_server(
         preco_max: float | None = None,
         apenas_disponiveis: bool = True,
         limite: int = 5,
+        detalhe: Detalhe = "completo",
     ) -> out.BuscaProdutos:
         """Busca instrumentos no catálogo com preço, promoção, PIX e disponibilidade.
 
         Use para perguntas como "violões até R$1000", "ukulele para criança", "guitarra para metal".
         Categoria e faixa de preço são inferidas do texto quando não informadas.
+        `detalhe`: "resumo" (nome, preço, disponibilidade: menos tokens) ou "completo"
+        (+ especificações e descrição).
         """
         r = catalog.search(
             texto,
@@ -140,7 +149,7 @@ def build_server(
             filtros={
                 k: v for k, v in r.filters.items() if isinstance(v, str | float | bool) or v is None
             },
-            produtos=[_product(v) for v in r.items],
+            produtos=[_product(v, full=detalhe == "completo") for v in r.items],
             orientacao=r.note,
         )
 
@@ -288,11 +297,15 @@ def build_server(
 
     @mcp.tool(annotations=READ_ONLY)
     @_logged
-    def consultar_politica(pergunta: str, limite: int = 2) -> out.ConsultaPolitica:
+    def consultar_politica(
+        pergunta: str, limite: int = 2, detalhe: Detalhe = "completo"
+    ) -> out.ConsultaPolitica:
         """Trechos do manual de políticas relevantes para a pergunta.
 
         Cobre trocas e devoluções, pagamento, frete e entregas, promoções, garantia, horário,
         contato e endereço, e privacidade (LGPD).
+        `detalhe`: "completo" traz o texto das seções; "resumo" traz só título, tipo, custo em
+        tokens e a URI do resource (`politicas://<id>`), para o cliente buscar só o que couber.
         """
         hits = retriever.search(pergunta, k=max(1, min(limite, 4)), kind="policy")
         sections = [s for h in hits if (s := policies.get(h.doc_id))]
@@ -303,7 +316,8 @@ def build_server(
                     titulo=s.title,
                     tipo=s.kind,
                     tokens_estimados=s.tokens_est,
-                    conteudo=s.body,
+                    conteudo=s.body if detalhe == "completo" else None,
+                    uri=f"politicas://{s.id}",
                 )
                 for s in sections
             ],

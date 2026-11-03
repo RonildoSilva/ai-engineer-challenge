@@ -226,7 +226,7 @@ uv run python scripts/smoke_llm.py   # terminal 2: chat simples + chamada de fer
 ```
 
 `start_llamafile.sh` aceita variáveis de ambiente: `MODE` (`chat` ou `embedding`), `MODEL`, `ALIAS`, `PORT`,
-`CTX`, `THREADS` (padrão: núcleos físicos), `GPU` (`disable` nos dois modos; `auto` só em placa validada) e
+`CTX`, `THREADS` (padrão: núcleos físicos), `PARALLEL` (slots do chat; padrão 1 em CPU, aumente com GPU), `GPU` (`disable` nos dois modos; `auto` só em placa validada) e
 `REASONING` (`off` por padrão, só no chat).
 
 ```bash
@@ -275,7 +275,7 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>570 testes, ~35 s, offline<br/>+44 com Postgres, job próprio]
+        L2 --> L3[pytest unitário<br/>588 testes, ~35 s, offline<br/>+51 com Postgres, job próprio]
         L3 --> L4[pytest -m integration<br/>9 testes, ~5 min,<br/>sobe os modelos reais]
     end
     K -.-> K2
@@ -297,21 +297,22 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | `.gitignore` | binários, `.env`, `_raw/` e gerados fora do git; manifesto, `.env.example` e dados brutos dentro | `tests/test_infra.py` |
 | Relatório de dados | cada número de `docs/data_report.md` continua verdadeiro sobre `data/raw` (11) | `tests/test_data_findings.py` |
 | Orquestrador | ordem topológica, ciclo/dependência inexistente rejeitados, execução incremental por conteúdo, invalidação por entrada/código/versão, saída adulterada detectada, falha isola dependentes, linhagem (19) | `tests/test_pipeline_core.py` |
+| Id de requisição | `request_id` só dentro do contexto, contexto aninhado restaura o anterior, um id por turno em todos os logs, chamadas de tool no MCP rastreáveis (3) | `tests/test_request_id.py` |
 | Config, logs e CLI | defaults, sobrescrita por ambiente, **config inválida falha cedo**, logs texto/JSON, `emporio pipeline` e códigos de saída (12) | `tests/test_config_cli.py` |
 | Camada de dados | regras de tratamento, 7 tipos de linha inválida reportados com `arquivo:linha campo`, integridade referencial, **7 violações barradas pelos `CHECK`s do banco**, banco anterior intacto quando a validação falha, mudança de regra refaz o `transform` (41) | `tests/test_data_layer.py` |
 | Repository | **suíte de contrato** (22, reutilizável para o Postgres) + somente leitura, injeção de SQL, uma conexão por thread (4) | `tests/contract/`, `tests/test_sqlite_repository.py` |
 | Manual de políticas | extração em seções numeradas (listas não viram seção, números não quebram), curadoria completa e em dia com o PDF, **fato ausente / seção do PDF alterada / seção sem curadoria detectados**, decisões aplicadas, busca por assunto (15 perguntas reais + 3 fora de escopo), CLI (38) | `tests/test_policies.py` |
 | Catálogo | preço com promoção × PIX (§6.2), faixa de preço e categoria extraídas do texto, acessórios × "violão de 7 cordas", exemplo do enunciado ("violões até R$1000": 12 opções), preço promocional nos filtros, nome aproximado e pergunta inteira ("Quanto custa o Takamine GD20?"), ambiguidade, alternativas para esgotado/descontinuado/em breve, CLI (62) | `tests/test_catalog.py` |
 | Pedidos e regras | verificação por e-mail ou telefone **do titular** (com/sem DDD, +55) e mensagem neutra em qualquer falha, e-mail duplicado só abre o próprio pedido, pedido atrasado, prazos de arrependimento/defeito/preferência dentro e fora da janela, garantia legal, parcelamento pelas faixas da §3.1, frete metropolitano × outras cidades × frete especial, feriados (Páscoa calculada) e fuso de Campo Grande, CLI (70) | `tests/test_orders_rules.py` |
-| Servidor MCP | exatamente as 8 tools, todas somente leitura e com saída estruturada; nenhuma forma de listar clientes; respostas de cada tool (GD20, promoção sem PIX, alternativas, escopos, pedido verificado e não verificado, devolução, pagamento, frete, horário, políticas); erro esperado amigável, argumento inválido rejeitado, **erro inesperado sem detalhes internos**, **logs sem e-mail/telefone**; resources e prompt; transportes **stdio e HTTP** com subprocesso real (26) | `tests/test_mcp_server.py` |
+| Servidor MCP | exatamente as 8 tools, todas somente leitura e com saída estruturada; nenhuma forma de listar clientes; respostas de cada tool (GD20, promoção sem PIX, alternativas, escopos, pedido verificado e não verificado, devolução, pagamento, frete, horário, políticas); erro esperado amigável, argumento inválido rejeitado, **erro inesperado sem detalhes internos**, **logs sem e-mail/telefone**; resources e prompt; transportes **stdio e HTTP** com subprocesso real; `detalhe="resumo"` mais barato, com a URI do resource para o texto completo (27) | `tests/test_mcp_server.py` |
 | Cliente LLM | perfis do projeto válidos (online marcados como referência), seleção e sobrescritas, **chave de API ausente com erro claro**, contexto lido de `/props` e fallback, temperatura e `max_tokens` do perfil, tools só se suportadas, **normalização de respostas de modelos pequenos** (JSON inválido nos argumentos, cercas de código, tool call escrita como texto, bloco `<think>`), servidor fora do ar e erro 5xx, CLI (25) | `tests/test_llm_client.py` |
 | Detecção de assunto | 16 frases reais com uma intenção e 5 com várias ("quanto custa o GD20 e dá pra fazer em 10x?"), devolução não vira busca de catálogo, assunto desconhecido, subconjunto de tools, "18h"/"12x"/e-mail não viram código de modelo, dados citados (pedido, e-mail, telefone, valor, parcelas, cidade), "meu telefone é…" não é pergunta sobre a loja, **mensagem só com dados herda a intenção**, dados completados pelo histórico, trecho do produto na frase, reclamação (33) | `tests/test_router.py` |
-| Guardrails | **injeção de prompt** (9 frases, PT e EN), **dados de terceiros** (8), **fora do escopo** (6), mensagem longa, **11 perguntas legítimas parecidas que precisam passar**; na saída, contato de terceiros mascarado (loja e o próprio cliente preservados) e persona recitada; no agente: mensagem bloqueada não chega ao LLM nem às tools, reclamação sozinha com resposta pronta e encaminhada, reclamação + troca com orientação, categoria vazia, instrução recitada → correção → resposta de segurança, diretrizes internas e notas de curadoria fora dos dados, **turno bloqueado não contamina o seguinte**, e-mail com acento da loja preservado (17 funções, 49 casos) | `tests/test_guardrails.py` |
+| Guardrails | **injeção de prompt** (9 frases, PT e EN), **dados de terceiros** (8), **fora do escopo** (6), mensagem longa, **11 perguntas legítimas parecidas que precisam passar**; na saída, contato de terceiros mascarado (loja e o próprio cliente preservados) e persona recitada; no agente: mensagem bloqueada não chega ao LLM nem às tools, reclamação sozinha com resposta pronta e encaminhada, reclamação + troca com orientação, categoria vazia, instrução recitada → correção → resposta de segurança, diretrizes internas e notas de curadoria fora dos dados, **turno bloqueado não contamina o seguinte**, e-mail com acento da loja preservado; **status sem fonte**: disponibilidade contrária aos dados e status de pedido sem consulta verificada, sem barrar frases corretas (22 funções, 57 casos) | `tests/test_guardrails.py` |
 | Orçamento de contexto | disponível = janela − resposta − margem, **8k × 128k** (seções e produtos pedidos), seções escolhidas pelo **custo publicado pelo MCP**, tudo cabe em 128k, em 8k o histórico antigo sai primeiro e aos pares, ordem das mensagens, **resultado de tool nunca cortado ao meio**, tools que não cabem saem e são reportadas (9) | `tests/test_budget.py` |
 | Agente | persona e contexto (data de referência, loja aberta) no system prompt, tools do MCP no formato do LLM, loop tool → resultado → resposta, histórico só com perguntas e respostas, argumento inválido / tool inexistente / erro da tool devolvidos ao modelo, **nome de tool quase certo corrigido**, **resposta de segurança** (limite de rodadas, LLM fora do ar, resposta vazia), PII mascarada no rastro, agente via stdio; **pré-busca**: "posso devolver?" em 1 chamada sem tools com a regra dos 7 dias, preço pronto e "sem promoção" explícito, preço do produto alimentando a simulação de 10x, pedido sem dados → pede os dados → pré-busca no turno seguinte, acessório, assunto desconhecido, janela grande; **preço sem fonte**: uma correção e depois resposta de segurança; pedido sem dados respondido sem LLM, pedindo só o que falta; **respostas prontas** de acessório, horário (com o semanal) e contato (do manual); pergunta seguinte usa o preço do último produto; desconto com produto em contexto dispensa o manual (36) | `tests/test_agent.py` |
-| Chat e histórico | e-mail/telefone mascarados ao gravar (pedido e preço preservados), sessão de ida e volta com metadados do turno, janela sempre começando pelo cliente, ordem das sessões e exclusão em cascata, uma conexão por thread, **sessão retomada devolve o histórico e o assunto** ("é o 8, telefone…" continua o pedido), sessão inexistente, `/nova` limpa, transcrição markdown com tools e sem PII, CLI `emporio chat` (conversa, retomada, `--list`, `/nova`, erro), turnos bloqueados fora do contexto ao retomar (14) | `tests/test_chat.py` |
+| Chat e histórico | e-mail/telefone mascarados ao gravar (pedido e preço preservados), sessão de ida e volta com metadados do turno, janela sempre começando pelo cliente, ordem das sessões e exclusão em cascata, uma conexão por thread, **sessão retomada devolve o histórico e o assunto** ("é o 8, telefone…" continua o pedido), sessão inexistente, `/nova` limpa, transcrição markdown com tools e sem PII, CLI `emporio chat` (conversa, retomada, `--list`, `/nova`, erro), turnos bloqueados fora do contexto ao retomar; **suíte de contrato do `HistoryStore`** (a mesma roda no Postgres) (15) | `tests/test_chat.py` |
 | Avaliação | cenários, intenções e gabarito de busca válidos (rótulos existentes, ids únicos, exemplos do enunciado presentes), **frases da avaliação diferentes das dos testes**, semântica das asserções (sem acento, pontuação preservada, resposta de segurança reprova), **os 18 cenários passam com o oráculo** (o dado certo chega ao modelo), métricas do classificador (precisão/revocação por rótulo) e **piso de 90%**, métricas de busca, resumo regenerado de todos os JSON, CLI `emporio eval` (12) | `tests/test_evals.py` |
-| Postgres + pgvector | **as mesmas suítes de contrato** do `Repository` (22) e do `Retriever` (híbrido sobre pgvector), documentos idênticos aos do SQLite, **ranking do pgvector igual ao do índice SQLite**, filtro por tipo no SQL, conexão somente leitura, injeção de SQL inerte, `CHECK`s equivalentes, carga idempotente, servidor MCP inteiro rodando sobre os dois backends por configuração (44; job `postgres` do CI, contra um Postgres real) | `tests/test_postgres.py` |
+| Postgres + pgvector | **as mesmas suítes de contrato** do `Repository` (22) e do `Retriever` (híbrido sobre pgvector), documentos idênticos aos do SQLite, **ranking do pgvector igual ao do índice SQLite**, filtro por tipo no SQL, conexão somente leitura, injeção de SQL inerte, `CHECK`s equivalentes, carga idempotente, servidor MCP inteiro rodando sobre os dois backends por configuração, **suíte de contrato do `HistoryStore`** no Postgres e seleção por `HISTORY_BACKEND` (51; job `postgres` do CI, contra um Postgres real) | `tests/test_postgres.py` |
 | Deploy | imagens fixadas por digest, uv do Dockerfile igual ao do setup, `.dockerignore` como lista de permissão sem `_raw`/`.env`/modelos, perfis do compose, mesma imagem Postgres no CI e no compose (6); job `docker` do CI constrói a imagem e responde dentro do container | `tests/test_deploy.py` |
 | Busca | documentos (descrição suja não entra), índice vetorial, **suíte de contrato do `Retriever`** (lexical e híbrido), fusão RRF, limiar de similaridade, **degradação para lexical** (serviço fora do ar, índice vazio, modelo trocado) e recuperação, cache de vetores, etapa sem modelo, CLI (44) | `tests/test_retrieval.py`, `tests/contract/` |
 | Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo"); **encerrar o `emporio mcp` (SIGTERM ou SIGHUP) encerra o servidor de embeddings**; **`LLMClient` com o Bonsai real** (contexto 8192 lido de `/props` e tool call); **agente de ponta a ponta** (mesma conversa): "Quanto custa o Takamine GD20?" → pré-busca `detalhar_produto` → 1 chamada → R$ 2.199 sem "promocional"; "posso devolver?" → pré-busca da política → regra dos 7 dias (9) | `tests/test_llm_integration.py` |
@@ -535,14 +536,14 @@ flowchart LR
 
 | Tool | Para quê |
 |---|---|
-| `buscar_produtos(texto, categoria, preco_min, preco_max, apenas_disponiveis, limite)` | opções com preço, promoção e PIX; filtros inferidos do texto |
+| `buscar_produtos(texto, categoria, preco_min, preco_max, apenas_disponiveis, limite, detalhe)` | opções com preço, promoção e PIX; filtros inferidos do texto; `detalhe="resumo"` dispensa especificações e descrição (a pré-busca usa) |
 | `detalhar_produto(produto)` | um modelo (nome aproximado, pergunta inteira ou id), com alternativas se indisponível |
 | `consultar_pedido(numero_pedido, email_ou_telefone)` | status, itens, total e rastreio, **só para o titular** |
 | `verificar_devolucao(numero_pedido, email_ou_telefone, motivo)` | troca/devolução pelas regras do manual |
 | `simular_pagamento(valor, preco_promocional, parcelas)` | PIX, débito, boleto e parcelamento válido |
 | `calcular_frete(valor_pedido, cidade, produto_ou_categoria)` | Campo Grande, outras cidades, frete especial |
 | `status_loja()` | aberta ou fechada agora, próxima abertura |
-| `consultar_politica(pergunta, limite)` | seções do manual relevantes (busca híbrida) |
+| `consultar_politica(pergunta, limite, detalhe)` | seções do manual relevantes (busca híbrida); `detalhe="resumo"` traz só título, custo em tokens e a URI do resource, para o cliente buscar só o que couber |
 
 - **Resources:** `politicas://indice` (seções com **custo estimado em tokens**, para o orçamento de contexto),
   `politicas://{secao}` e `catalogo://categorias`.
@@ -650,6 +651,7 @@ flowchart LR
 | **Reclamação** ou pedido de atendimento humano | intenção própria: sozinha, resposta pronta (empatia, registro, retorno em 24 h úteis, WhatsApp); com outro assunto, orientação ao modelo. O turno fica marcado como **encaminhado** no histórico |
 | **Saída: contato de terceiros** | e-mail/telefone que não seja da loja nem citado pelo cliente vira `[dado protegido]` |
 | **Saída: instruções recitadas** (16+ palavras seguidas iguais à persona ou às orientações do turno) | 1 correção, depois resposta de segurança |
+| **Saída: status sem fonte** — status de pedido afirmado sem consulta com o titular verificado; disponibilidade contrária aos dados (o Bonsai disse que um violão esgotado "já está disponível") | 1 correção, depois resposta de segurança; a checagem olha só a frase que cita o produto, então "a alternativa está disponível" passa |
 | **Dados internos** | seções do manual do tipo `guideline` (instruções ao atendente) e notas de curadoria não entram nos dados pré-buscados: o Bonsai as recitava |
 
 As listas são conservadoras: bloquear uma pergunta legítima custa mais do que deixar o modelo recusar. Os
@@ -831,11 +833,12 @@ interfaces.
 |---|---|---|---|
 | Orquestração | DAG próprio, incremental, com linhagem | Airflow/Dagster (mesmas funções de etapa) | ✅ DAG · template Airflow *(planejado)* |
 | Configuração | `.env` validado na inicialização (falha cedo) | variáveis de ambiente / secret manager | ✅ |
-| Logs | texto no terminal | JSON, uma linha por evento (`LOG_FORMAT=json`) | ✅ |
+| Logs | texto no terminal, com o id do turno (`request_id`) em cada linha | JSON, uma linha por evento (`LOG_FORMAT=json`); o `request_id` liga todos os eventos de um atendimento | ✅ |
 | Dados | SQLite somente leitura atrás de `Repository` | Postgres (`STORE_BACKEND=postgres`), mesma suíte de contrato, no CI | ✅ |
 | Busca | híbrida (lexical + vetores em SQLite, fusão RRF) atrás de `Retriever`; degrada para lexical | pgvector com índice HNSW (`VECTOR_BACKEND=pgvector`), mesma suíte de contrato, no CI | ✅ |
 | Embeddings | embeddinggemma-300m no runtime llamafile, em CPU, atrás de `Embedder` | API de embeddings ou GPU | ✅ |
 | API | servidor MCP via stdio ou Streamable HTTP (local, sem autenticação) | MCP HTTP atrás de API gateway com OAuth, réplicas | ✅ MCP · auth *(planejado)* |
+| Histórico | SQLite (`history.db`) atrás de `HistoryStore` | Postgres (`HISTORY_BACKEND=postgres`), mesma suíte de contrato, no CI: várias réplicas atendem a mesma sessão | ✅ |
 | Serviços locais | sobem sob demanda e encerram ao final (também com SIGTERM/SIGHUP); porta ocupada → porta livre; log em arquivo | containers: `deploy/docker-compose.yml` (LLM, embeddings, pipeline, MCP; perfil `scale` com Postgres) | ✅ |
 | LLM | perfil `bonsai` (local, CPU) | outros perfis: modelos maiores, GPU ou API | ✅ perfis · online *(referência)* |
 
@@ -1044,7 +1047,7 @@ flowchart TD
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR
-        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::done --> C17["17 · exemplos"]:::done --> CX["19–21 · Airflow,<br/>REST, UI"] --> C18["README final"]
+        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::done --> C17["17 · exemplos"]:::done --> C17b["17b · pendências<br/>da revisão"]:::done --> CX["19–21 · Airflow,<br/>REST, UI"] --> C18["README final"]
     end
     F1 --> F2 --> F3 --> F4 --> F5
     classDef next fill:#fde68a,stroke:#b45309,color:#000

@@ -294,3 +294,21 @@ def test_cli_catalog(built_store, monkeypatch, capsys):
     assert capsys.readouterr().out.count("alternativa:") == 3
     assert main(["catalog", "search", "vocês vendem palheta?"]) == 0
     assert "[accessory]" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("query", "name"),
+    [
+        ("tem o violão Giannini GF-3D?", "Giannini GF-3D Dreadnought Sunburst"),  # era "ambíguo"
+        ("e o GNF-3?", "Giannini GNF-3 CEQ Elétrico Nylon Natural"),
+        ("quanto custa o GD20", "Takamine GD20 Dreadnought Natural"),
+    ],
+)
+def test_model_code_in_the_question_picks_that_product(svc, query, name):
+    d = svc.detail(query)
+    assert d.status == "found"
+    assert d.product.product.name == name
+
+
+def test_brand_alone_is_still_ambiguous(svc):
+    assert svc.detail("takamine").status == "ambiguous"
