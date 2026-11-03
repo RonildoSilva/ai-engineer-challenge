@@ -1,0 +1,26 @@
+# Gabarito da busca: pergunta → documentos aceitos (produtos "p<id>", políticas = id da seção).
+# Criado na avaliação de embeddings (commit 6, docs/embeddings_eval.md) e usado também por
+# `uv run emporio eval retrieval` (lexical × híbrida, com os retrievers de produção).
+# Produtos: perguntas vagas, sem nome de modelo. Políticas: linguagem coloquial.
+
+queries:
+  - {query: "um violão bom e barato pra quem está começando", accept: [p81, p83, p85]}
+  - {query: "ukulele pequeno para uma criança", accept: [p116, p117, p118, p119]}
+  - {query: "violão de sete cordas para tocar chorinho", accept: [p109, p110, p111, p112, p113]}
+  - {query: "violão que dá pra ligar na caixa de som, com cordas de aço", accept: [p103, p104, p105, p106, p107, p108]}
+  - {query: "guitarra para tocar heavy metal rápido", accept: [p132]}
+  - {query: "baixo elétrico de quatro cordas", accept: [p135, p136, p137, p138]}
+  - {query: "bateria acústica completa para estúdio", accept: [p139, p140, p141]}
+  - {query: "teclado sintetizador para produzir música", accept: [p142, p143, p144]}
+  - {query: "guitarra com timbre encorpado para blues", accept: [p131, p134, p145]}
+  - {query: "violão clássico de nylon de nível intermediário", accept: [p82, p114]}
+  - {query: "comprei, me arrependi e quero meu dinheiro de volta", accept: [trocas_devolucoes]}
+  - {query: "vocês funcionam no fim de semana?", accept: [horarios]}
+  - {query: "posso pagar metade no pix e metade no cartão?", accept: [pagamento]}
+  - {query: "em quanto tempo uma encomenda chega em Corumbá?", accept: [frete_entregas]}
+  - {query: "o instrumento parou de funcionar depois de quatro meses de uso", accept: [garantia]}
+  - {query: "vai ter liquidação em novembro?", accept: [promocoes]}
+  - {query: "como faço pra vocês esquecerem meu cadastro?", accept: [privacidade]}
+  - {query: "onde vocês ficam?", accept: [sobre_contato]}
+  - {query: "estou muito chateado com o atendimento, quero reclamar", accept: [atendimento]}
+  - {query: "o pacote chegou amassado, o que eu faço?", accept: [frete_entregas, trocas_devolucoes]}

@@ -32,6 +32,24 @@ profiles:
       model_file: models/bonsai-1.7b/Bonsai-1.7B.gguf
     tested: true
 
+  qwen3-1.7b:
+    description: Qwen3-1.7B Q8_0 local via llamafile (candidato ≤ 4B; mesma arquitetura do Bonsai,
+      sem a quantização de 1 bit). Download opcional — EVAL_MODELS=1 ./scripts/setup.sh
+    base_url: http://127.0.0.1:8082/v1   # porta própria: não reaproveita um Bonsai já no ar
+    model: qwen3-1.7b
+    api_key: none
+    context_window: auto
+    fallback_context_window: 8192
+    max_output_tokens: 512
+    temperature: 0.2
+    supports_tools: true
+    timeout_s: 600
+    max_retries: 0
+    local:
+      mode: chat
+      model_file: models/qwen3-1.7b/Qwen3-1.7B-Q8_0.gguf
+    tested: true
+
   ollama-qwen2.5-3b:
     description: Qwen2.5 3B via Ollama (candidato ≤ 4B; requer Ollama instalado)
     base_url: http://127.0.0.1:11434/v1

@@ -27,6 +27,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 from emporio.config import Settings
 from emporio.data.rules import normalize
 from emporio.domain.policies import STOPWORDS, PolicyStore
@@ -71,32 +73,12 @@ CANDIDATES = {
     ]
 }
 
-# (pergunta, ids aceitos). Produtos: "p<id>"; políticas: id da seção.
+# (pergunta, ids aceitos). Produtos: "p<id>"; políticas: id da seção. Fonte única com a
+# avaliação de produção (`emporio eval retrieval`): evals/retrieval.yaml.
 QUERIES: list[tuple[str, set[str]]] = [
-    # produtos (perguntas vagas, sem nome de modelo)
-    ("um violão bom e barato pra quem está começando", {"p81", "p83", "p85"}),
-    ("ukulele pequeno para uma criança", {"p116", "p117", "p118", "p119"}),
-    ("violão de sete cordas para tocar chorinho", {"p109", "p110", "p111", "p112", "p113"}),
-    ("violão que dá pra ligar na caixa de som, com cordas de aço",
-     {"p103", "p104", "p105", "p106", "p107", "p108"}),
-    ("guitarra para tocar heavy metal rápido", {"p132"}),
-    ("baixo elétrico de quatro cordas", {"p135", "p136", "p137", "p138"}),
-    ("bateria acústica completa para estúdio", {"p139", "p140", "p141"}),
-    ("teclado sintetizador para produzir música", {"p142", "p143", "p144"}),
-    ("guitarra com timbre encorpado para blues", {"p131", "p134", "p145"}),
-    ("violão clássico de nylon de nível intermediário", {"p82", "p114"}),
-    # políticas (pouca sobreposição de palavras com o manual)
-    ("comprei, me arrependi e quero meu dinheiro de volta", {"trocas_devolucoes"}),
-    ("vocês funcionam no fim de semana?", {"horarios"}),
-    ("posso pagar metade no pix e metade no cartão?", {"pagamento"}),
-    ("em quanto tempo uma encomenda chega em Corumbá?", {"frete_entregas"}),
-    ("o instrumento parou de funcionar depois de quatro meses de uso", {"garantia"}),
-    ("vai ter liquidação em novembro?", {"promocoes"}),
-    ("como faço pra vocês esquecerem meu cadastro?", {"privacidade"}),
-    ("onde vocês ficam?", {"sobre_contato"}),
-    ("estou muito chateado com o atendimento, quero reclamar", {"atendimento"}),
-    ("o pacote chegou amassado, o que eu faço?", {"frete_entregas", "trocas_devolucoes"}),
-]  # fmt: skip
+    (q["query"], set(q["accept"]))
+    for q in yaml.safe_load((ROOT / "evals/retrieval.yaml").read_text(encoding="utf-8"))["queries"]
+]
 
 
 # ------------------------------------------------------------------------------ corpus

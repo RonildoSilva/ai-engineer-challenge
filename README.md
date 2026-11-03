@@ -24,6 +24,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 - [Pedidos e regras da loja](#pedidos-e-regras-da-loja)
 - [Servidor MCP (a API)](#servidor-mcp-a-api)
 - [Agente](#agente)
+- [Avaliação](#avaliação)
 - [Camada de dados](#camada-de-dados)
 - [Escalabilidade e robustez](#escalabilidade-e-robustez)
 - [Modelos locais](#modelos-locais)
@@ -193,6 +194,7 @@ flowchart LR
 ```bash
 ./scripts/setup.sh                 # tudo (~630 MB de download na primeira vez)
 SKIP_MODEL=1 ./scripts/setup.sh    # sem runtime/modelo local (ex.: usar só API online)
+EVAL_MODELS=1 ./scripts/setup.sh   # + Qwen3-1.7B (1,8 GB), o modelo de comparação da avaliação
 ```
 
 ## Como rodar
@@ -245,7 +247,14 @@ uv run emporio llm check [--profile bonsai]        # conexão, contexto, chat e 
 uv run emporio ask "Quanto custa o Takamine GD20?" --debug   # uma pergunta ao agente, sem histórico
 ```
 
-> A avaliação será documentada aqui quando for implementada.
+Avaliação (ver [Avaliação](#avaliação)):
+
+```bash
+uv run emporio eval intents             # classificador de intenção + guardrails (milissegundos)
+uv run emporio eval retrieval           # busca lexical × híbrida (sobe os embeddings)
+uv run emporio eval scenarios           # 18 cenários com o oráculo (segundos)
+uv run emporio eval scenarios --profile bonsai --profile qwen3-1.7b   # com LLMs reais (~20 min cada)
+```
 
 ## Verificação (testes e CI)
 
@@ -263,7 +272,7 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>537 testes, ~30 s, offline]
+        L2 --> L3[pytest unitário<br/>551 testes, ~35 s, offline]
         L3 --> L4[pytest -m integration<br/>9 testes, ~5 min,<br/>sobe os modelos reais]
     end
     K -.-> K2
@@ -298,6 +307,7 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Orçamento de contexto | disponível = janela − resposta − margem, **8k × 128k** (seções e produtos pedidos), seções escolhidas pelo **custo publicado pelo MCP**, tudo cabe em 128k, em 8k o histórico antigo sai primeiro e aos pares, ordem das mensagens, **resultado de tool nunca cortado ao meio**, tools que não cabem saem e são reportadas (9) | `tests/test_budget.py` |
 | Agente | persona e contexto (data de referência, loja aberta) no system prompt, tools do MCP no formato do LLM, loop tool → resultado → resposta, histórico só com perguntas e respostas, argumento inválido / tool inexistente / erro da tool devolvidos ao modelo, **nome de tool quase certo corrigido**, **resposta de segurança** (limite de rodadas, LLM fora do ar, resposta vazia), PII mascarada no rastro, agente via stdio; **pré-busca**: "posso devolver?" em 1 chamada sem tools com a regra dos 7 dias, preço pronto e "sem promoção" explícito, preço do produto alimentando a simulação de 10x, pedido sem dados → pede os dados → pré-busca no turno seguinte, acessório, assunto desconhecido, janela grande; **preço sem fonte**: uma correção e depois resposta de segurança; pedido sem dados respondido sem LLM, pedindo só o que falta (28) | `tests/test_agent.py` |
 | Chat e histórico | e-mail/telefone mascarados ao gravar (pedido e preço preservados), sessão de ida e volta com metadados do turno, janela sempre começando pelo cliente, ordem das sessões e exclusão em cascata, uma conexão por thread, **sessão retomada devolve o histórico e o assunto** ("é o 8, telefone…" continua o pedido), sessão inexistente, `/nova` limpa, transcrição markdown com tools e sem PII, CLI `emporio chat` (conversa, retomada, `--list`, `/nova`, erro) (13) | `tests/test_chat.py` |
+| Avaliação | cenários, intenções e gabarito de busca válidos (rótulos existentes, ids únicos, exemplos do enunciado presentes), **frases da avaliação diferentes das dos testes**, semântica das asserções (sem acento, pontuação preservada, resposta de segurança reprova), **os 18 cenários passam com o oráculo** (o dado certo chega ao modelo), métricas do classificador (precisão/revocação por rótulo) e **piso de 90%**, métricas de busca, resumo regenerado de todos os JSON, CLI `emporio eval` (12) | `tests/test_evals.py` |
 | Busca | documentos (descrição suja não entra), índice vetorial, **suíte de contrato do `Retriever`** (lexical e híbrido), fusão RRF, limiar de similaridade, **degradação para lexical** (serviço fora do ar, índice vazio, modelo trocado) e recuperação, cache de vetores, etapa sem modelo, CLI (44) | `tests/test_retrieval.py`, `tests/contract/` |
 | Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo"); **encerrar o `emporio mcp` (SIGTERM ou SIGHUP) encerra o servidor de embeddings**; **`LLMClient` com o Bonsai real** (contexto 8192 lido de `/props` e tool call); **agente de ponta a ponta** (mesma conversa): "Quanto custa o Takamine GD20?" → pré-busca `detalhar_produto` → 1 chamada → R$ 2.199 sem "promocional"; "posso devolver?" → pré-busca da política → regra dos 7 dias (9) | `tests/test_llm_integration.py` |
 
@@ -681,6 +691,77 @@ O que sobra de latência é o processamento do prompt em CPU (~17–20 tokens/s 
 usar só os núcleos físicos: 4 threads processam o prompt 35% mais rápido que as 8 do modo automático
 (19,8 × 14,6 tokens/s).
 
+## Avaliação
+
+`src/emporio/evals/` mede três coisas, com gabaritos versionados em `evals/` e resultados em
+[`evals/resultados/`](evals/resultados/README.md) (um JSON por rodada e um resumo gerado):
+
+```mermaid
+flowchart LR
+    subgraph E1[Cenários · evals/scenarios.yaml]
+        S[18 conversas, 20 turnos<br/>asserções por turno] --> O[oráculo<br/>sem LLM]
+        S --> B[Bonsai-1.7B]
+        S --> Q[Qwen3-1.7B]
+    end
+    subgraph E2[Classificador · evals/intents.yaml]
+        I[59 frases inéditas<br/>intenções + bloqueios]
+    end
+    subgraph E3[Busca · evals/retrieval.yaml]
+        R[20 perguntas coloquiais] --> LX[lexical]
+        R --> HY[híbrida]
+    end
+```
+
+**Cenários de ponta a ponta** (o agente completo: assunto → pré-busca → LLM → guardrails). Cobrem os exemplos do
+enunciado (preço do GD20, "violões até R$1000"), duas intenções numa frase, promoção, esgotado com
+alternativas, categoria vazia, acessório, pedido em duas mensagens, contato errado (LGPD), **devolução fora do
+prazo em dois turnos**, regras da loja e os guardrails. As asserções são por turno: assunto, tools usadas,
+texto que precisa (ou não pode) aparecer, bloqueio, "sem LLM", encaminhamento e "sem resposta de segurança".
+
+O **oráculo** é um "modelo" que só devolve os dados que recebeu das tools. Ele mede o encanamento (o dado
+certo chega ao modelo?), roda em segundos e está no CI (`tests/test_evals.py`). A diferença entre o oráculo e
+um modelo real é o erro de redação do modelo.
+
+| Perfil | Cenários aprovados | Turnos com LLM | Latência por turno com LLM (p50 · p95) | Prompt médio |
+|---|---|---|---|---|
+| oráculo (sem LLM) | **18/18** | 14/20 | — | 924 tokens |
+| **Qwen3-1.7B** Q8_0 (1,8 GB) | **18/18** | 14/20 | **57 s · 107 s** | 924 tokens |
+| Bonsai-1.7B 1 bit (248 MB, baseline) | 16/18 | 14/20 | 65 s · 177 s | 924 tokens |
+
+<sub>CPU i5-8265U (4 núcleos), 8k de contexto, mesmo runtime llamafile, mesma pré-busca. 6 dos 20 turnos não
+chamam o LLM (guardrails e respostas prontas).</sub>
+
+- **Bonsai falhou em 2:** no `acessorio`, devolveu a orientação interna ("Responda com orientação recebida,
+  sem chamar ferramentas") em vez de explicar que a loja só vende instrumentos; no 2º turno da
+  `devolucao_fora_do_prazo`, recebeu "prazo final 24/02/2026, não elegível" e escreveu "há 0 dias
+  restantes, você pode seguir os próximos passos", sem dizer que o prazo acabou. O oráculo passa nos dois:
+  o dado certo chegou, o erro foi de redação.
+- **Qwen3-1.7B** (mesma arquitetura do Bonsai, sem a quantização de 1 bit) passou em todos e foi mais rápido no
+  p95: a quantização extrema economiza 7× de disco e memória, mas custa qualidade de redação.
+- **Correções feitas durante a avaliação** (registradas no resultado): uma asserção do `produto_esgotado`
+  proibia "está disponível" e reprovava a resposta certa "não está disponível" (corrigida e o turno do Qwen3
+  reavaliado a partir da resposta gravada); e o `.env` local com `LLM_BASE_URL`/`LLM_MODEL` sobrescrevia
+  qualquer perfil (o Qwen3 subiu com o nome do Bonsai; as sobrescritas agora valem só para o perfil ativo).
+- O oráculo achou **3 falhas de encanamento** antes de qualquer modelo rodar, todas corrigidas: o motivo da
+  devolução se perdia quando a mensagem seguinte era só o e-mail; devolução com número do pedido e sem contato
+  agora pede só o que falta, sem LLM; e "frete de um pedido de R$ 600" disparava consulta de pedido.
+
+**Classificador de intenção e guardrails** (59 frases escritas para a avaliação, diferentes das dos testes):
+a 1ª medição deu **88%** de acerto exato (52/59). Quatro erros eram lacunas claras de vocabulário ("funciona"
+marcava horário em "como funciona o reembolso", "tampa rachada" não era defeito, "quanto tempo demora pra
+chegar" não era frete, "jogo de ontem" não era fora do escopo) e foram corrigidos: **95%** (56/59), 0,4 ms por
+frase. Depois disso o conjunto deixou de ser cego. Os 3 erros restantes ficam como limitação: "garantia de
+um violão" também dispara catálogo, "manutenção em instrumento" vira catálogo em vez de "geral" e "me
+recomenda um filme" passa como catálogo (palavra "recomenda").
+
+**Busca** (os retrievers de produção, 20 perguntas coloquiais com gabarito, o mesmo da escolha do modelo de
+embeddings):
+
+| Busca | hit@1 | hit@3 | MRR | Latência p50 |
+|---|---|---|---|---|
+| lexical | 70% | 75% | 0,729 | 0,9 ms |
+| **híbrida** (lexical + embeddinggemma, RRF) | **90%** | **95%** | **0,925** | 71 ms |
+
 ## Camada de dados
 
 ```mermaid
@@ -781,14 +862,17 @@ OpenAI; trocar de modelo é mudar `LLM_PROFILE`, sem tocar no código.
 | Perfil | Modelo | Contexto | Status |
 |---|---|---|---|
 | `bonsai` (padrão) | Bonsai-1.7B local, llamafile | `auto` (lido de `/props`: 8192) | ✅ testado; sobe sozinho se estiver fora do ar |
+| `qwen3-1.7b` | Qwen3-1.7B Q8_0 local, llamafile, porta 8082 (download opcional: `EVAL_MODELS=1`) | `auto` | ✅ testado na avaliação: 18/18 cenários × 16/18 do Bonsai |
 | `ollama-qwen2.5-3b` | Qwen2.5 3B via Ollama | 32768 | referência (Ollama não instalado aqui) |
 | `anthropic` | Claude Haiku (endpoint compatível com OpenAI) | 128000 | referência (precisa de `ANTHROPIC_API_KEY`) |
 | `openai` | `OPENAI_MODEL` | 128000 | referência (precisa de `OPENAI_API_KEY`) |
 
 - **Chaves nunca ficam no arquivo:** `api_key_env` aponta a variável de ambiente; sem ela, o erro diz qual
   variável definir.
-- **Contexto por modelo:** `auto` lê o `n_ctx` do servidor (`/props`); o orçamento de contexto do agente
-  (próximos commits) usa esse número.
+- **Contexto por modelo:** `auto` lê o `n_ctx` do servidor (`/props`); o orçamento de contexto do agente usa
+  esse número.
+- **Sobrescritas `LLM_*`** (`LLM_BASE_URL`, `LLM_MODEL`…) valem só para o perfil ativo (`LLM_PROFILE` ou o
+  padrão); `--profile outro` usa o perfil como está no arquivo.
 - **Tolerância a modelos pequenos:** o cliente normaliza argumentos de tool com JSON inválido ou entre cercas
   de código, recupera tool calls escritas como texto (`<tool_call>…</tool_call>`) e remove blocos `<think>`.
   Um argumento inválido vira um erro devolvido ao modelo, em vez de quebrar a conversa.
@@ -871,7 +955,7 @@ flowchart TD
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR
-        C15["15 · avaliação"]:::next --> C16["16 · escala<br/>Postgres/pgvector"] --> C17["17 · exemplos"] --> CX["19–21 · Airflow,<br/>REST, UI"] --> C18["README final"]
+        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::next --> C17["17 · exemplos"] --> CX["19–21 · Airflow,<br/>REST, UI"] --> C18["README final"]
     end
     F1 --> F2 --> F3 --> F4 --> F5
     classDef next fill:#fde68a,stroke:#b45309,color:#000
@@ -890,7 +974,7 @@ data/curated/    curadoria do manual (uma seção .md por tema + _source.yaml) �
 data/processed/  artefatos gerados (SQLite, policies.json, extração do PDF) — não versionado
 docs/            relatório de dados (data_report.md), avaliação de embeddings (embeddings_eval.md/.json);
                  workflow com IA (planejado)
-evals/           cenários e resultados por modelo                 (planejado)
+evals/           cenários, gabaritos e resultados (evals/resultados/README.md)
 examples/        conversas de exemplo                             (planejado)
 models/          manifest.tsv (versionado) + binários (não versionados)
 scripts/         setup, verificação (check.sh), download de modelos, start do llamafile, smoke test,
@@ -928,7 +1012,9 @@ tests/           testes automatizados (unitários + integração com o LLM local
 - O valor do frete para outras cidades não é calculado (depende de CEP, peso, dimensões e APIs das
   transportadoras); o agente informa os prazos e que o valor sai no fechamento.
 - Os perfis online (Anthropic, OpenAI) e o do Ollama são configurações de referência: não foram executados
-  aqui (sem chaves de API e sem Ollama instalado). Só o `bonsai` está validado de ponta a ponta.
+  aqui (sem chaves de API e sem Ollama instalado). Só `bonsai` e `qwen3-1.7b` estão validados de ponta a ponta.
+- A avaliação tem 18 cenários e uma rodada por modelo (temperatura 0,2): é um retrato, não uma estatística.
+  Com o Bonsai levando ~1 min por resposta em CPU, repetir cada cenário várias vezes custaria horas.
 - O servidor MCP via HTTP não tem autenticação: escuta só em `127.0.0.1` por padrão. Em produção, ficaria
   atrás de um gateway com OAuth (o SDK já oferece suporte).
 - A verificação de identidade aceita o telefone sem DDD (8+ dígitos finais): é prática para o cliente, mas

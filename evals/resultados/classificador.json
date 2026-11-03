@@ -1,0 +1,128 @@
+{
+  "gerado_em": "2026-11-03T12:59:18-03:00",
+  "total": 59,
+  "acerto_exato": 0.949,
+  "ms_por_frase": 0.447,
+  "rotulos": {
+    "!dados_de_terceiros": {
+      "precisao": 1.0,
+      "revocacao": 1.0,
+      "f1": 1.0,
+      "suporte": 3
+    },
+    "!fora_do_escopo": {
+      "precisao": 1.0,
+      "revocacao": 0.75,
+      "f1": 0.857,
+      "suporte": 4
+    },
+    "!injecao": {
+      "precisao": 1.0,
+      "revocacao": 1.0,
+      "f1": 1.0,
+      "suporte": 3
+    },
+    "acessorio": {
+      "precisao": 1.0,
+      "revocacao": 1.0,
+      "f1": 1.0,
+      "suporte": 4
+    },
+    "catalogo": {
+      "precisao": 0.727,
+      "revocacao": 1.0,
+      "f1": 0.842,
+      "suporte": 8
+    },
+    "devolucao": {
+      "precisao": 1.0,
+      "revocacao": 1.0,
+      "f1": 1.0,
+      "suporte": 5
+    },
+    "frete": {
+      "precisao": 1.0,
+      "revocacao": 1.0,
+      "f1": 1.0,
+      "suporte": 4
+    },
+    "geral": {
+      "precisao": 1.0,
+      "revocacao": 0.5,
+      "f1": 0.667,
+      "suporte": 2
+    },
+    "horario": {
+      "precisao": 1.0,
+      "revocacao": 1.0,
+      "f1": 1.0,
+      "suporte": 3
+    },
+    "pagamento": {
+      "precisao": 1.0,
+      "revocacao": 1.0,
+      "f1": 1.0,
+      "suporte": 5
+    },
+    "pedido": {
+      "precisao": 1.0,
+      "revocacao": 1.0,
+      "f1": 1.0,
+      "suporte": 4
+    },
+    "politica": {
+      "precisao": 1.0,
+      "revocacao": 1.0,
+      "f1": 1.0,
+      "suporte": 5
+    },
+    "produto": {
+      "precisao": 1.0,
+      "revocacao": 1.0,
+      "f1": 1.0,
+      "suporte": 5
+    },
+    "reclamacao": {
+      "precisao": 1.0,
+      "revocacao": 1.0,
+      "f1": 1.0,
+      "suporte": 3
+    },
+    "saudacao": {
+      "precisao": 1.0,
+      "revocacao": 1.0,
+      "f1": 1.0,
+      "suporte": 3
+    }
+  },
+  "erros": [
+    {
+      "frase": "quanto tempo de garantia tem um violão?",
+      "esperado": [
+        "politica"
+      ],
+      "obtido": [
+        "catalogo",
+        "politica"
+      ]
+    },
+    {
+      "frase": "vocês fazem manutenção em instrumento?",
+      "esperado": [
+        "geral"
+      ],
+      "obtido": [
+        "catalogo"
+      ]
+    },
+    {
+      "frase": "me recomenda um filme",
+      "esperado": [
+        "!fora_do_escopo"
+      ],
+      "obtido": [
+        "catalogo"
+      ]
+    }
+  ]
+}

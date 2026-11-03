@@ -98,7 +98,8 @@ _THIRD_PARTY = re.compile(
 
 _OFF_TOPIC = re.compile(
     r"\b(?:"
-    r"receitas?|bolo|cozinhar|futebol|campeonato|jogo do|time do|politic[ao]s? (?!de troca|da loja"
+    r"receitas?|bolo|cozinhar|futebol|campeonato|jogo do|jogo de ontem|resultado do jogo"
+    r"|time do|politic[ao]s? (?!de troca|da loja"
     r"|de privacidade|de devolucao|de frete|de pagamento)|eleic\w+|presidente|governo|noticias?"
     r"|previsao do tempo|vai chover|horoscopo|signo|piada|filme|series?|novela|bitcoin|cripto"
     r"|investimento|acoes da bolsa|remedio|doenca|sintoma|dieta|programacao|codigo em|python"

@@ -5,6 +5,7 @@
 #
 # Uso:  ./scripts/setup.sh            (tudo)
 #       SKIP_MODEL=1 ./scripts/setup.sh   (sem baixar o modelo local)
+#       EVAL_MODELS=1 ./scripts/setup.sh  (+ Qwen3-1.7B, modelo de comparação da avaliação)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -42,6 +43,10 @@ if [[ -z "${SKIP_MODEL:-}" ]]; then
   ./scripts/download_model.sh llamafile-0.10.6
   ./scripts/download_model.sh bonsai-1.7b
   ./scripts/download_model.sh embeddinggemma-300m
+  # Modelo de comparação da avaliação (1,8 GB): só com EVAL_MODELS=1
+  if [[ -n "${EVAL_MODELS:-}" ]]; then
+    ./scripts/download_model.sh qwen3-1.7b
+  fi
 else
   echo "… modelos locais ignorados (SKIP_MODEL=1)"
 fi

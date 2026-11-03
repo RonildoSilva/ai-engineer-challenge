@@ -45,6 +45,12 @@ def test_profile_selection_and_overrides(monkeypatch):
     p = get_profile(make_settings(llm_base_url="http://127.0.0.1:9999/v1", llm_temperature=0.0))
     assert p.base_url == "http://127.0.0.1:9999/v1"
     assert p.temperature == 0.0
+    # um perfil pedido por nome que não é o ativo não herda as sobrescritas do .env
+    env = make_settings(llm_base_url="http://localhost:8080/v1", llm_model="bonsai")
+    qwen = get_profile(env, "qwen3-1.7b")
+    assert qwen.base_url == "http://127.0.0.1:8082/v1"
+    assert qwen.model == "qwen3-1.7b"
+    assert get_profile(env, "bonsai").base_url == "http://localhost:8080/v1"  # ativo: herda
 
 
 def test_unknown_profile():

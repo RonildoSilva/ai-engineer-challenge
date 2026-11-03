@@ -1,0 +1,83 @@
+{
+  "gerado_em": "2026-11-03T13:01:36-03:00",
+  "resultados": [
+    {
+      "busca": "lexical",
+      "hit@1": 0.7,
+      "hit@3": 0.75,
+      "mrr": 0.729,
+      "ms_p50": 0.9,
+      "erros_no_top1": [
+        {
+          "pergunta": "violão de sete cordas para tocar chorinho",
+          "top3": [
+            "atendimento",
+            "sobre_contato",
+            "p109"
+          ],
+          "posicao_certa": 3
+        },
+        {
+          "pergunta": "violão que dá pra ligar na caixa de som, com cordas de aço",
+          "top3": [
+            "p86",
+            "atendimento",
+            "sobre_contato"
+          ],
+          "posicao_certa": 4
+        },
+        {
+          "pergunta": "baixo elétrico de quatro cordas",
+          "top3": [
+            "atendimento",
+            "sobre_contato",
+            "p111"
+          ],
+          "posicao_certa": null
+        },
+        {
+          "pergunta": "como faço pra vocês esquecerem meu cadastro?",
+          "top3": [],
+          "posicao_certa": null
+        },
+        {
+          "pergunta": "onde vocês ficam?",
+          "top3": [],
+          "posicao_certa": null
+        },
+        {
+          "pergunta": "o pacote chegou amassado, o que eu faço?",
+          "top3": [],
+          "posicao_certa": null
+        }
+      ]
+    },
+    {
+      "busca": "híbrida",
+      "hit@1": 0.9,
+      "hit@3": 0.95,
+      "mrr": 0.925,
+      "ms_p50": 71.1,
+      "erros_no_top1": [
+        {
+          "pergunta": "violão que dá pra ligar na caixa de som, com cordas de aço",
+          "top3": [
+            "p86",
+            "p103",
+            "p112"
+          ],
+          "posicao_certa": 2
+        },
+        {
+          "pergunta": "baixo elétrico de quatro cordas",
+          "top3": [
+            "p111",
+            "p98",
+            "p102"
+          ],
+          "posicao_certa": null
+        }
+      ]
+    }
+  ]
+}

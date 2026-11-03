@@ -104,11 +104,19 @@ def load_profiles(path: Path) -> ProfilesFile:
 
 
 def get_profile(settings: Settings, name: str | None = None) -> LLMProfile:
-    """Perfil ativo (argumento > LLM_PROFILE > default), com sobrescritas LLM_* do ambiente."""
+    """Perfil pedido (argumento > LLM_PROFILE > default), com sobrescritas LLM_* do ambiente.
+
+    As sobrescritas valem só para o perfil ativo (LLM_PROFILE ou o default). Um perfil pedido
+    por nome que seja outro não as recebe: um `LLM_BASE_URL` do `.env` apontando para o Bonsai
+    fazia `--profile qwen3-1.7b` subir na porta e com o nome do Bonsai.
+    """
     data = load_profiles(settings.path(settings.llm_profiles_file))
-    chosen = name or settings.llm_profile or data.default
+    active = settings.llm_profile or data.default
+    chosen = name or active
     if chosen not in data.profiles:
         raise LLMConfigError(f"perfil '{chosen}' não existe. Perfis: {', '.join(data.profiles)}")
+    if chosen != active:
+        return data.profiles[chosen]
     overrides = {
         "base_url": settings.llm_base_url,
         "model": settings.llm_model,

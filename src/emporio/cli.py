@@ -20,6 +20,8 @@ emporio llm check [--profile bonsai]                       conexão, contexto, c
 emporio ask "Quanto custa o Takamine GD20?" [--debug]      uma pergunta ao agente, de ponta a ponta
 emporio chat [--session ID] [--debug] [--transcript f.md]  conversa no terminal, com histórico
 emporio chat --list                                        sessões salvas
+emporio eval intents | retrieval                           classificador e busca (evals/)
+emporio eval scenarios [--profile bonsai --profile qwen3-1.7b]   cenários (padrão: oráculo)
 """
 
 from __future__ import annotations
@@ -156,6 +158,16 @@ def _add_service_commands(sub: argparse._SubParsersAction) -> None:
     ask.add_argument("question")
     ask.add_argument("--profile", help="perfil de LLM (padrão: LLM_PROFILE ou o default)")
     ask.add_argument("--debug", action="store_true", help="mostra as tools chamadas")
+    ev = sub.add_parser("eval", help="avaliação (resultados em evals/resultados/)")
+    ev_sub = ev.add_subparsers(dest="action", required=True)
+    ev_sub.add_parser("intents", help="classificador de intenção e guardrails (evals/intents.yaml)")
+    ev_sub.add_parser("retrieval", help="busca lexical × híbrida (evals/retrieval.yaml)")
+    ev_sc = ev_sub.add_parser("scenarios", help="cenários de ponta a ponta (evals/scenarios.yaml)")
+    ev_sc.add_argument(
+        "--profile", action="append", default=[],
+        help="perfil de LLM (repita para comparar); 'oraculo' = sem LLM",
+    )  # fmt: skip
+    ev_sc.add_argument("--only", action="append", default=[], help="só estes cenários (id)")
     chat = sub.add_parser("chat", help="conversa no terminal com histórico (sobe os servidores)")
     chat.add_argument("--profile", help="perfil de LLM (padrão: LLM_PROFILE ou o default)")
     chat.add_argument("--session", help="continua uma sessão anterior (id)")
@@ -398,6 +410,7 @@ def _llm_cmd(args: argparse.Namespace, settings: Settings) -> int:
                 profile.base_url,
                 settings.path(profile.local.model_file),
                 log_dir=settings.processed_dir / "logs",
+                alias=profile.model,
             ) as url:
                 return run(url)
         return run(profile.base_url)
@@ -423,6 +436,7 @@ def _run_agent(settings: Settings, profile_name: str | None, body) -> int:
                         profile.base_url,
                         settings.path(profile.local.model_file),
                         log_dir=settings.processed_dir / "logs",
+                        alias=profile.model,
                     )
                 )
             llm = LLMClient(profile.model_copy(update={"base_url": llm_url}))
@@ -542,6 +556,98 @@ def _chat_cmd(args: argparse.Namespace, settings: Settings) -> int:
         store.close()
 
 
+EVALS_DIR = Path("evals")
+
+
+def _eval_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    from emporio.evals import classifier, report, retrieval  # noqa: PLC0415
+
+    evals, out = settings.path(EVALS_DIR), settings.path(EVALS_DIR / "resultados")
+    if args.action == "intents":
+        r = classifier.evaluate(classifier.load_items(evals / "intents.yaml"))
+        report.save(out, "classificador", r.to_dict())
+        print(f"acerto exato: {r.accuracy:.0%} de {r.total} frases ({len(r.errors)} erros)")
+        for e in r.errors:
+            print(f"  ✘ {e['frase']!r}: esperado {e['esperado']}, obtido {e['obtido']}")
+        return 0
+    if args.action == "retrieval":
+        queries = retrieval.load_queries(evals / "retrieval.yaml")
+
+        def run(url: str | None) -> int:
+            lexical = build_retriever(settings.model_copy(update={"embedding_backend": "none"}))
+            hybrid = build_retriever(settings, url)
+            rows = [retrieval.evaluate("lexical", lexical, queries)]
+            name = "híbrida" if url else "híbrida (sem embeddings: degradou para lexical)"
+            rows.append(retrieval.evaluate(name, hybrid, queries))
+            report.save(out, "busca", {"resultados": [r.to_dict() for r in rows]})
+            for r in rows:
+                print(f"{r.name:<10} hit@1 {r.hit1:.0%}  hit@3 {r.hit3:.0%}  MRR {r.mrr:.3f}  "
+                      f"{r.ms_p50:.1f} ms")  # fmt: skip
+            return 0
+
+        return _with_embeddings(settings, run)
+    return _eval_scenarios(args, settings, evals, out)
+
+
+def _eval_scenarios(args: argparse.Namespace, settings: Settings, evals: Path, out: Path) -> int:
+    from emporio.evals import report, scenarios  # noqa: PLC0415
+
+    selected = scenarios.load_scenarios(evals / "scenarios.yaml")
+    if args.only:
+        selected = [s for s in selected if s.id in set(args.only)]
+    status = 0
+
+    async def run_all(make_agent, name: str, model: str) -> dict:
+        results = []
+        for sc in selected:
+            print(f"  · {sc.id} …", end="", flush=True, file=sys.stderr)
+            r = await scenarios.run_scenario(sc, make_agent)
+            secs = sum(t.latency_s for t in r.turns)
+            print(f" {'ok' if r.passed else 'FALHOU'} ({secs:.0f} s)", file=sys.stderr)
+            results.append(r)
+        summary = scenarios.summarize(name, model, results)
+        if not args.only:
+            report.save(out, f"cenarios_{name}", summary)
+        print(
+            f"{name}: {summary['aprovados']}/{summary['cenarios']} cenários, "
+            f"p50 {summary['latencia_llm_p50_s']} s, p95 {summary['latencia_llm_p95_s']} s"
+        )
+        return summary  # fmt: skip
+
+    for name in args.profile or ["oraculo"]:
+        print(f"▶ {name}", file=sys.stderr)
+        if name == "oraculo":
+
+            def run(url: str | None) -> int:
+                server = build_server(settings, embedding_url=url)
+
+                async def go() -> dict:
+                    async with McpToolbox(server) as toolbox:
+
+                        async def make() -> Agent:
+                            return Agent(scenarios.OracleLLM(), toolbox,
+                                         reference_date=settings.reference_date)  # fmt: skip
+
+                        return await run_all(make, "oraculo", "nenhum (devolve os dados)")
+
+                s = asyncio.run(go())
+                return 0 if s["aprovados"] == s["cenarios"] else 1
+
+            status |= _with_embeddings(settings, run)
+            continue
+
+        async def body(agent: Agent, llm: LLMClient, name: str = name) -> int:
+            async def make() -> Agent:
+                return Agent(agent.llm, agent.toolbox, reference_date=settings.reference_date,
+                             budget=agent.budget)  # fmt: skip
+
+            await run_all(make, name, llm.profile.resolved_model())
+            return 0
+
+        status |= _run_agent(settings, name, body)
+    return status
+
+
 def main(argv: list[str] | None = None) -> int:
     for sig in (signal.SIGTERM, signal.SIGHUP):  # kill e terminal fechado
         signal.signal(sig, _exit_on_signal)
@@ -565,6 +671,7 @@ def main(argv: list[str] | None = None) -> int:
         "llm": _llm_cmd,
         "ask": _ask_cmd,
         "chat": _chat_cmd,
+        "eval": _eval_cmd,
     }
     try:
         return commands[args.command](args, settings)

@@ -79,6 +79,7 @@ def ensure_server(
     *,
     log_dir: Path | None = None,
     startup_timeout: float = 120.0,
+    alias: str | None = None,
 ) -> Generator[str, None, None]:
     """Garante um servidor saudável durante o bloco e produz a URL efetiva (`.../v1`).
 
@@ -108,6 +109,8 @@ def ensure_server(
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"llamafile-{mode}.log"
     env = {**os.environ, "MODE": mode, "HOST": host, "PORT": str(port), "MODEL": str(model_file)}
+    if alias:
+        env["ALIAS"] = alias  # nome do modelo na API (o perfil o envia em cada requisição)
     log.info("subindo servidor llamafile", extra={"mode": mode, "url": base_url})
     with log_file.open("w") as out:
         proc = subprocess.Popen(  # noqa: S603 — script do próprio projeto, sem entrada do usuário

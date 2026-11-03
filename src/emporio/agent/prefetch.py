@@ -147,6 +147,8 @@ async def run_prefetch(
 
 class _Planner:
     def __init__(self, route: Route, text: str, toolbox: McpToolbox, budget: ContextBudget):
+        # numa mensagem só com dados ("leticia@…"), o assunto é o da mensagem que o abriu
+        text = route.topic if route.inherited and route.topic else text
         self.route, self.text, self.toolbox, self.budget = route, text, toolbox, budget
         self.pf = Prefetch()
         self.price: tuple[float, bool] | None = None  # (valor, em promoção) do produto achado
@@ -215,6 +217,9 @@ class _Planner:
             else:
                 self.policy_topics.append(Intent.DEVOLUCAO)
                 self.pf.notes.append(ASK_ORDER_DATA_RETURN)
+                if r.intents == (Intent.DEVOLUCAO,) and (s.order_id or s.contact):
+                    # já começou a informar os dados: pede só o que falta, sem LLM
+                    self.pf.direct_answer = ask_order_data(s.order_id, s.contact)
 
     async def money(self) -> None:
         """Pagamento e frete: com valor (do produto ou citado) calcula; sem valor, a política."""

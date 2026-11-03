@@ -48,6 +48,8 @@ KEYWORDS: dict[Intent, tuple[str, ...]] = {
         "troca", "trocas", "trocar", "devolver", "devolucao", "devolucoes", "devolvo",
         "arrependi", "arrependimento", "arrependido", "arrependida", "defeito", "defeituoso",
         "estragado", "quebrado", "quebrada", "veio errado", "estorno", "reembolso",
+        "rachado", "rachada", "trincado", "trincada", "riscado", "riscada", "amassado",
+        "amassada", "parou de funcionar", "nao funciona", "com problema",
         "cancelar", "cancelamento", "dinheiro de volta",
     ),
     Intent.PAGAMENTO: (
@@ -58,11 +60,12 @@ KEYWORDS: dict[Intent, tuple[str, ...]] = {
     Intent.FRETE: (
         "frete", "fretes", "entrega", "entregas", "entregam", "entregar", "envio", "enviam",
         "enviar", "envia", "sedex", "pac", "jadlog", "motoboy", "retirar", "retirada",
-        "prazo de entrega", "quanto tempo chega", "chega em",
+        "prazo de entrega", "quanto tempo chega", "chega em", "demora pra chegar",
+        "demora para chegar", "quanto tempo demora",
     ),
     Intent.HORARIO: (
         "horario", "horarios", "abre", "abrem", "aberto", "aberta", "fecha", "fecham",
-        "fechado", "fechada", "funciona", "funcionamento", "feriado", "feriados", "domingo",
+        "fechado", "fechada", "funcionamento", "feriado", "feriados", "domingo",
         "sabado", "que horas", "expediente",
     ),
     Intent.POLITICA: (
@@ -187,6 +190,9 @@ class Route:
     intents: tuple[Intent, ...]
     slots: Slots = field(default_factory=Slots)
     inherited: bool = False  # intenções vieram do turno anterior
+    # mensagem que abriu o assunto: "quero devolver o pedido 7, me arrependi" continua sendo o
+    # motivo quando a mensagem seguinte é só o e-mail
+    topic: str = ""
 
     @property
     def tools(self) -> tuple[str, ...]:
@@ -207,7 +213,8 @@ _MODEL_CODE = re.compile(r"\b(?=[a-z]*\d)(?=\d*[a-z])[a-z0-9]{3,}\b")  # gd20, y
 
 def detect_intents(text: str) -> tuple[Intent, ...]:
     """Intenções da mensagem, em ordem de prioridade (pode ser vazia)."""
-    t = normalize(text)
+    # "um pedido de R$ 600" é valor de compra, não consulta de pedido
+    t = _ORDER_VALUE.sub(" compra ", normalize(text))
     found: list[Intent] = []
     for intent in (Intent.PEDIDO, Intent.DEVOLUCAO, Intent.PAGAMENTO, Intent.FRETE,
                    Intent.HORARIO, Intent.POLITICA, Intent.RECLAMACAO):  # fmt: skip
@@ -226,6 +233,7 @@ def detect_intents(text: str) -> tuple[Intent, ...]:
     return tuple(dict.fromkeys(found))
 
 
+_ORDER_VALUE = re.compile(r"\bpedidos? (?:de|acima de|com valor de|no valor de) (?:r )?\d")
 _CONTACT_WORDS = frozenset({"telefone", "whatsapp", "contato", "email da loja"})
 # assuntos em que citar a categoria não é pedir opções ("meu violão veio com defeito")
 _SERVICE = frozenset({Intent.PEDIDO, Intent.DEVOLUCAO, Intent.FRETE, Intent.RECLAMACAO})
@@ -294,5 +302,5 @@ def route(text: str, previous: Route | None = None, history: Sequence[str] = ())
     if (not intents or intents == (Intent.SAUDACAO,)) and previous and gave_data:
         follow = tuple(i for i in previous.intents if i not in (Intent.SAUDACAO, Intent.GERAL))
         if follow:
-            return Route(follow, slots, inherited=True)
-    return Route(intents or (Intent.GERAL,), slots)
+            return Route(follow, slots, inherited=True, topic=previous.topic or text)
+    return Route(intents or (Intent.GERAL,), slots, topic=text)
