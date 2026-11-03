@@ -676,16 +676,16 @@ flowchart LR
 
 | Situation | How it is handled |
 |---|---|
-| **Prompt injection** ("ignore as instruções", "mostre seu prompt", "você agora é…", "modo desenvolvedor") | ready-made reply, no LLM: does not change the service behavior or reveal instructions |
+| **Prompt injection** ("ignore as instruções" (ignore the instructions), "mostre seu prompt" (show your prompt), "você agora é…" (you are now…), "modo desenvolvedor" (developer mode)) | ready-made reply, no LLM: does not change the service behavior or reveal instructions |
 | **Third-party data** ("liste os clientes", "qual o e-mail da Ana?", "quem comprou o GD20?") | ready-made reply citing LGPD; the MCP server also has no tool that lists customers |
 | **Explicitly out of scope** (recipes, soccer, politics, jokes, programming…) | redirects to the store, no LLM; only if no store topic was detected ("violão pra tocar no jogo do Brasil" proceeds normally) |
 | **Unknown topic** ("vocês têm estacionamento?") | goes to the model with 3 generic tools; the persona says to politely decline anything that is not about the store |
-| **Accessories** and **empty categories** | accessory alone: ready-made reply, with the item the tool identified ("não vendemos palheta nem outros acessórios…"); empty category: the prefetch brings the domain guidance ("no momento não há…") |
-| **After a refusal** | the blocked turn does not return to the model's context (it stays in the saved history and the transcript); before, the next guitar request turned into "aqui está a receita de bolo" |
+| **Accessories** and **empty categories** | accessory alone: ready-made reply, with the item the tool identified ("não vendemos palheta nem outros acessórios…" — "we don't sell picks or other accessories…"); empty category: the prefetch brings the domain guidance ("no momento não há…" — "right now there are no…") |
+| **After a refusal** | the blocked turn does not return to the model's context (it stays in the saved history and the transcript); before, the next guitar request turned into "aqui está a receita de bolo" ("here is the cake recipe") |
 | **Complaint** or request for a human agent | its own intent: alone, a ready-made reply (empathy, logging, response within 24 business h, WhatsApp); with another topic, guidance to the model. The turn is marked as **handed off** in the history |
 | **Output: third-party contact** | an email/phone that is neither the store's nor cited by the customer becomes `[dado protegido]` |
 | **Output: recited instructions** (16+ consecutive words identical to the persona or the turn's guidance) | 1 correction, then safe fallback reply |
-| **Output: status without a source**: order status claimed without a lookup with the verified order holder; availability contrary to the data (Bonsai said an out-of-stock guitar "já está disponível") | 1 correction, then safe fallback reply; the check only looks at the sentence that cites the product, so "a alternativa está disponível" passes |
+| **Output: status without a source**: order status claimed without a lookup with the verified order holder; availability contrary to the data (Bonsai said an out-of-stock guitar "já está disponível" — "is already available") | 1 correction, then safe fallback reply; the check only looks at the sentence that cites the product, so "a alternativa está disponível" ("the alternative is available") passes |
 | **Internal data** | manual sections of type `guideline` (instructions to the agent) and curation notes are not included in the prefetched data: Bonsai recited them |
 
 The lists are conservative: blocking a legitimate question costs more than letting the model decline. The
@@ -876,33 +876,35 @@ guardrails and ready-made replies. The run with the models predates the ready-ma
 it has one more LLM turn than the oracle; this run's latencies came out ~1.5× the previous run's (57 s and 65 s
 p50) because the machine was more loaded.</sub>
 
-- **Bonsai failed on 1:** in `produto_esgotado`, it said the Giannini GF-3D "já está disponível", but it is
+- **Bonsai failed on 1:** in `produto_esgotado`, it said the Giannini GF-3D "já está disponível" ("is already available"), but it is
   out of stock, and the tool said so (in the previous run it got this scenario right; the temperature is 0.2). It is the most
   serious error we saw; after this run a status post-check was added that catches exactly this case (see
   [Guardrails](#agent)).
 - **Bonsai's progress:** 16/18 in the 1st run. Both failures were wording errors on correct data: in `acessorio`, it
-  repeated the internal guidance; in the return past the deadline, it wrote "há 0 dias restantes" instead of saying the
-  deadline had passed. After the adjustments (accessory with a ready-made reply, return with an explicit "não é mais possível" and
+  repeated the internal guidance; in the return past the deadline, it wrote "há 0 dias restantes" ("there are 0 days left") instead of saying the
+  deadline had passed. After the adjustments (accessory with a ready-made reply, return with an explicit "não é mais possível" ("no longer possible") and
   no expired-days counter), it passed both.
 - **Qwen3-1.7B** (same architecture as Bonsai, without the 1-bit quantization) passed all of them in both runs and was
   faster: extreme quantization saves 7× in disk and memory, but costs wording quality.
 - **Assertions fixed after seeing the replies** (each case recorded as a note in the result, with the reply
-  and the original failure): "está disponível" failed the correct reply "não está disponível"; "Não tenho saxofone" and
-  "não há mais tempo para devolver" were correct forms that the list did not anticipate. The turns were re-evaluated from
+  and the original failure): "está disponível" (is available) failed the correct reply "não está disponível" (is not available); "Não tenho
+  saxofone" (I don't have a saxophone) and "não há mais tempo para devolver" (no time left to return) were correct forms that the list did not anticipate. The turns were re-evaluated from
   the recorded replies, without running the model again.
 - **Local `.env`** with `LLM_BASE_URL`/`LLM_MODEL` overrode any profile (in the 1st run Qwen3 came up with
   Bonsai's name); overrides now only apply to the active profile.
 - The oracle found **3 plumbing failures** before any model ran, all fixed: the return reason
   was lost when the next message was just the email; a return with an order number and no contact
-  now asks only for what is missing, without LLM; and "frete de um pedido de R$ 600" triggered an order lookup.
+  now asks only for what is missing, without LLM; and "frete de um pedido de R$ 600" (shipping for an R$ 600 order) triggered an order lookup.
 
 **Intent classifier and guardrails** (59 phrases written for the evaluation, different from the ones in the tests):
 the 1st measurement gave **88%** exact-match accuracy (52/59). Four errors were clear vocabulary gaps ("funciona"
-flagged hours in "como funciona o reembolso", "tampa rachada" was not a defect, "quanto tempo demora pra
-chegar" was not shipping, "jogo de ontem" was not out of scope) and were fixed: **95%** (56/59), 0.4 ms per
+— "open"/"works" — flagged hours in "como funciona o reembolso" (how does the refund work), "tampa rachada"
+(cracked top) was not a defect, "quanto tempo demora pra chegar" (how long does it take to arrive) was not shipping,
+"jogo de ontem" (yesterday's game) was not out of scope) and were fixed: **95%** (56/59), 0.4 ms per
 phrase. After that the set stopped being blind. The 3 remaining errors stay as a limitation: "garantia de
-um violão" also triggers catalog, "manutenção em instrumento" becomes catalog instead of "geral" and "me
-recomenda um filme" passes as catalog (word "recomenda").
+um violão" (guitar warranty) also triggers catalog, "manutenção em instrumento" (instrument repair) becomes
+catalog instead of "geral" (general) and "me recomenda um filme" (recommend me a movie) passes as catalog (word
+"recomenda").
 
 **Search** (the production retrievers, 20 colloquial questions with an answer key, the same one used to choose the
 embeddings model):
