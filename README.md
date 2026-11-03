@@ -1,5 +1,7 @@
 # Empório da Música — Agente de Atendimento
 
+🇺🇸 *English version: [README.en.md](README.en.md)*
+
 [![ci](https://github.com/RonildoSilva/ai-engineer-challenge/actions/workflows/ci.yml/badge.svg)](https://github.com/RonildoSilva/ai-engineer-challenge/actions/workflows/ci.yml)
 
 Protótipo de agente de atendimento por texto para a loja fictícia **Empório da Música**, em Campo Grande/MS.
@@ -1199,6 +1201,7 @@ docs/            relatório de dados (data_report.md), avaliação de embeddings
                  screenshots da interface (img/)
 evals/           cenários, gabaritos e resultados (evals/resultados/README.md)
 deploy/          Dockerfile e docker-compose (padrão e perfil scale com Postgres + pgvector)
+README.en.md     este README em inglês (o PDF da entrega sai dele: scripts/build_docs_pdf.py)
 dags/            template de DAG do Airflow, gerado das etapas do pipeline
 web/             interface web (React + TypeScript + Tailwind, Vite) sobre a API REST
 examples/        5 conversas com o Bonsai, comentadas (examples/README.md)
