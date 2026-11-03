@@ -837,17 +837,20 @@ polished finish (components, theme, typography), accepting the cost of a pinned 
 [`evals/resultados/`](evals/resultados/README.md) (one JSON per run and a generated summary):
 
 ```mermaid
-flowchart LR
-    subgraph E1[Scenarios · evals/scenarios.yaml]
-        S[18 conversations, 20 turns<br/>assertions per turn] --> O[oracle<br/>no LLM]
+flowchart TB
+    subgraph E1[Scenarios]
+        direction TB
+        S[evals/scenarios.yaml<br/>18 conversations, 20 turns<br/>assertions per turn] --> O[oracle<br/>no LLM]
         S --> B[Bonsai-1.7B]
         S --> Q[Qwen3-1.7B]
     end
-    subgraph E2[Classifier · evals/intents.yaml]
-        I[59 unseen phrases<br/>intents + blocks]
+    subgraph E2[Classifier]
+        direction TB
+        I[evals/intents.yaml<br/>59 unseen phrases] --> IB[intents<br/>+ blocks]
     end
-    subgraph E3[Search · evals/retrieval.yaml]
-        R[20 colloquial questions] --> LX[lexical]
+    subgraph E3[Search]
+        direction TB
+        R[evals/retrieval.yaml<br/>20 colloquial questions] --> LX[lexical]
         R --> HY[hybrid]
     end
 ```

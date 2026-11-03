@@ -24,12 +24,20 @@ MERMAID_IMAGE = (
     "minlag/mermaid-cli:11.4.2@sha256:"
     "99c983b3ab4e14033f2880bc1b9de17e5090b4515dabd63fe9cf8c0ae6130956"
 )
+# Mais largura antes de quebrar rótulos e margem para os títulos de subgrafo: com o padrão (200 px),
+# títulos longos quebravam em duas linhas e a segunda passava por cima das caixas.
+MERMAID_CONFIG = (
+    '{"flowchart": {"wrappingWidth": 420, "subGraphTitleMargin": {"top": 6, "bottom": 10},'
+    ' "nodeSpacing": 40, "rankSpacing": 45}}'
+)
 BLOCK = re.compile(r"```mermaid\n(.*?)```", re.DOTALL)
 
 CSS = """
 @page { size: A4; margin: 16mm 14mm; }
 body { font-family: "Inter", "Segoe UI", system-ui, sans-serif; font-size: 10.2pt;
        line-height: 1.45; color: #1d2027; max-width: none; }
+p, li, blockquote { text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
+td, th { text-align: left; hyphens: auto; }
 h1 { font-size: 20pt; border-bottom: 3px solid #b8722c; padding-bottom: 4px; margin-top: 0; }
 h1, h2, h3 { font-family: "Lora", Georgia, serif; color: #1d2027; page-break-after: avoid; }
 h2 { font-size: 14.5pt; border-bottom: 1px solid #e6ddd0; padding-bottom: 3px; margin-top: 22px; }
@@ -63,14 +71,15 @@ def render_mermaid(md: str, out_dir: Path) -> str:
 
     def replace(m: re.Match[str]) -> str:
         code = m.group(1)
-        name = hashlib.sha256(code.encode()).hexdigest()[:16]
+        name = hashlib.sha256((MERMAID_CONFIG + code).encode()).hexdigest()[:16]
         svg = out_dir / f"{name}.svg"
         if not svg.exists():
             (out_dir / f"{name}.mmd").write_text(code, encoding="utf-8")
+            (out_dir / "config.json").write_text(MERMAID_CONFIG, encoding="utf-8")
             subprocess.run(  # noqa: S603 — comando fixo, entradas geradas aqui
                 ["docker", "run", "--rm", "-u", f"{os.getuid()}:{os.getgid()}",  # noqa: S607
                  "-v", f"{out_dir}:/data", MERMAID_IMAGE, "-i", f"/data/{name}.mmd",
-                 "-o", f"/data/{name}.svg", "-b", "white"],
+                 "-o", f"/data/{name}.svg", "-b", "white", "-c", "/data/config.json"],
                 check=True, capture_output=True,
             )  # fmt: skip
         return f'<figure class="diagram"><img src="{svg}" alt="diagram"></figure>\n'
@@ -113,7 +122,8 @@ def main() -> int:
         html = tmp / "doc.html"
         subprocess.run(  # noqa: S603
             ["pandoc", str(source), "-f", "gfm-tex_math_dollars-tex_math_gfm", "-t", "html5", "-s",  # noqa: S607
-             "--metadata", f"pagetitle={args.title}", "--css", str(css), "-o", str(html)],
+             "--metadata", f"pagetitle={args.title}", "--metadata", "lang=en",
+             "--css", str(css), "-o", str(html)],
             check=True,
         )  # fmt: skip
         args.output.parent.mkdir(parents=True, exist_ok=True)

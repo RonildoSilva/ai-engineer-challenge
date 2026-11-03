@@ -835,17 +835,20 @@ elegante (componentes, tema, tipografia), aceitando o custo de uma cadeia Node f
 [`evals/resultados/`](evals/resultados/README.md) (um JSON por rodada e um resumo gerado):
 
 ```mermaid
-flowchart LR
-    subgraph E1[Cenários · evals/scenarios.yaml]
-        S[18 conversas, 20 turnos<br/>asserções por turno] --> O[oráculo<br/>sem LLM]
+flowchart TB
+    subgraph E1[Cenários]
+        direction TB
+        S[evals/scenarios.yaml<br/>18 conversas, 20 turnos<br/>asserções por turno] --> O[oráculo<br/>sem LLM]
         S --> B[Bonsai-1.7B]
         S --> Q[Qwen3-1.7B]
     end
-    subgraph E2[Classificador · evals/intents.yaml]
-        I[59 frases inéditas<br/>intenções + bloqueios]
+    subgraph E2[Classificador]
+        direction TB
+        I[evals/intents.yaml<br/>59 frases inéditas] --> IB[intenções<br/>+ bloqueios]
     end
-    subgraph E3[Busca · evals/retrieval.yaml]
-        R[20 perguntas coloquiais] --> LX[lexical]
+    subgraph E3[Busca]
+        direction TB
+        R[evals/retrieval.yaml<br/>20 perguntas coloquiais] --> LX[lexical]
         R --> HY[híbrida]
     end
 ```
