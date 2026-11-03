@@ -35,7 +35,7 @@ jobs:
           key: models-${{ hashFiles('models/manifest.tsv') }}
 
       - name: Setup do zero (scripts/setup.sh)
-        run: ./scripts/setup.sh
+        run: SKIP_CHECK=1 ./scripts/setup.sh  # o check.sh completo roda no passo seguinte
 
       - name: Verificação completa (scripts/check.sh)
         run: ./scripts/check.sh

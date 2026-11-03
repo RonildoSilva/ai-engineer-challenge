@@ -239,6 +239,11 @@ _CONTACT_WORDS = frozenset({"telefone", "whatsapp", "contato", "email da loja"})
 _SERVICE = frozenset({Intent.PEDIDO, Intent.DEVOLUCAO, Intent.FRETE, Intent.RECLAMACAO})
 
 
+def policy_terms(text: str) -> list[str]:
+    """Palavras de política encontradas na mensagem (para saber por que o assunto foi detectado)."""
+    return _has_any(normalize(text), KEYWORDS[Intent.POLITICA])
+
+
 def _product_intents(text: str, t: str, *, service: bool) -> list[Intent]:
     if detect_accessory(text):
         return [Intent.ACESSORIO]

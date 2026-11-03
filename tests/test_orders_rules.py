@@ -149,7 +149,10 @@ def test_regret_out_of_window(svc):
     assert not a.eligible
     assert a.deadline == date(2026, 2, 24)  # entrega 17/02 + 7 dias
     assert "Fora do prazo" in a.message
+    assert "não é mais possível" in a.message  # o Bonsai lia "0 dias restantes" como "ainda dá"
+    assert a.days_left is None
     assert any("defeito" in s for s in a.next_steps)
+    assert not any("pergunte" in s.lower() for s in a.next_steps)  # texto para o cliente
 
 
 def test_regret_inside_window_with_other_reference_date(repo):
@@ -209,7 +212,7 @@ def test_return_on_not_delivered_orders(svc, order, contact, word):
 def test_return_asks_reason_when_unclear(svc):
     a = svc.assess_return(7, "leticia.rocha@jmail.com", "")
     assert a.reason is None
-    assert "Pergunte o motivo" in a.message
+    assert "me conta o motivo" in a.message
 
 
 def test_return_requires_verification(svc):

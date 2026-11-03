@@ -104,7 +104,7 @@ async def test_tool_call_then_answer(server):
 
 async def test_history_keeps_only_user_and_answers(server):
     llm = ScriptedLLM([tool("status_loja"), answer("Fechada hoje."), answer("De nada!")])
-    turns, agent = await run(server, llm, "a loja abre hoje?", "obrigado")
+    turns, agent = await run(server, llm, "a loja abre hoje?", "obrigado", routing=False)
     assert [t.answer for t in turns] == ["Fechada hoje.", "De nada!"]
     roles = [m["role"] for m in agent.messages]
     assert roles == ["system", "user", "assistant", "user", "assistant"]
@@ -258,11 +258,20 @@ async def test_order_plus_other_subject_still_goes_to_the_model(server):
     assert "número do pedido" in llm.seen[0][0]["content"]  # orientação no system
 
 
-async def test_accessory_is_redirected_without_tools(server):
-    llm = ScriptedLLM([answer("Não vendemos palhetas, só instrumentos.")])
-    await run(server, llm, "vocês vendem palheta?")
-    assert llm.tools_seen[0] is None
-    assert tool_results(llm.seen[0])["buscar_produtos"]["situacao"] == "accessory"
+async def test_accessory_alone_is_a_ready_reply_without_llm(server):
+    """O Bonsai recitava a orientação interna; acessório sozinho tem resposta pronta."""
+    (turn,), _ = await run(server, ScriptedLLM([]), "vocês vendem palheta?")
+    assert turn.llm_calls == 0
+    assert [t.name for t in turn.prefetched] == ["buscar_produtos"]  # a loja (MCP) decide
+    assert "não vendemos palheta" in turn.answer
+    assert "instrumentos musicais" in turn.answer
+
+
+def test_accessory_reply_wording():
+    from emporio.agent.prefetch import accessory_reply
+
+    assert "não vendemos afinador nem outros acessórios" in accessory_reply("afinador")
+    assert "não vendemos acessórios" in accessory_reply(None)
 
 
 async def test_unknown_subject_offers_only_generic_tools(server):
@@ -279,6 +288,63 @@ async def test_large_window_also_offers_the_subject_tools(server):
     (turn,), _ = await run(server, llm, "posso devolver?", budget=big)
     assert set(turn.tools_offered) == {"verificar_devolucao", "consultar_politica"}
     assert turn.prefetched[0].arguments["limite"] == 3  # mais seções do manual cabem
+
+
+async def test_followup_payment_uses_the_product_from_the_previous_turn(server):
+    """Após o GD20, "e dá pra fazer em 10x?" simula com o preço dele, sem chutar."""
+    llm = ScriptedLLM([answer("O GD20 custa R$ 2.199,00."), answer("Sim: 10x de R$ 219,90.")])
+    turns, _ = await run(server, llm, "Quanto custa o Takamine GD20?",
+                         "e dá pra fazer em 10x no cartão?")  # fmt: skip
+    assert [t.name for t in turns[1].prefetched] == ["simular_pagamento"]
+    assert turns[1].prefetched[0].arguments == {"valor": 2199.0, "preco_promocional": False,
+                                                "parcelas": 10}  # fmt: skip
+    assert turns[1].answer == "Sim: 10x de R$ 219,90."  # 219,90 tem fonte: passa na checagem
+
+
+async def test_payment_without_any_product_in_the_conversation_goes_to_policy(server):
+    llm = ScriptedLLM([answer("Parcelamos em até 12x sem juros.")])
+    (turn,), _ = await run(server, llm, "dá pra parcelar em 10x?")
+    assert [t.name for t in turn.prefetched] == ["consultar_politica"]
+
+
+async def test_hours_question_is_a_ready_reply_with_the_weekly_schedule(server):
+    """Pergunta de horário tem resposta pronta (o Bonsai respondia só "aberta agora")."""
+    (turn,), _ = await run(server, ScriptedLLM([]), "e vocês abrem no domingo?")
+    assert turn.llm_calls == 0
+    assert [t.name for t in turn.prefetched] == ["status_loja"]
+    assert "Domingo e feriados: fechado" in turn.answer
+
+
+async def test_contact_question_is_a_ready_reply_from_the_manual(server):
+    """Endereço é dado puro (o Bonsai trocava telefone e WhatsApp e chegou a inventar valores)."""
+    (turn,), _ = await run(server, ScriptedLLM([]), "qual o endereço da loja?")
+    assert turn.llm_calls == 0
+    assert [t.name for t in turn.prefetched] == ["consultar_politica"]
+    assert "Rua 14 de Maio, 3200" in turn.answer
+    assert "Telefone: (67) 3341-4444" in turn.answer
+    assert "WhatsApp (atendimento): (67) 3321-4500" in turn.answer
+
+
+async def test_policy_question_beyond_contact_still_goes_to_the_model(server):
+    llm = ScriptedLLM([answer("A garantia legal é de 90 dias.")])
+    (turn,), _ = await run(server, llm, "quanto tempo de garantia tem?")
+    assert turn.llm_calls == 1
+
+
+async def test_discount_question_with_product_in_context_skips_the_manual(server):
+    """Com o GD20 em contexto, "tem desconto no pix?" é respondido pela simulação.
+
+    O manual junto fazia o Bonsai despejar seções e chamar o PIX de "preço promocional".
+    """
+    llm = ScriptedLLM([answer("O GD20 custa R$ 2.199,00."), answer("No PIX sai R$ 2.089,05.")])
+    turns, _ = await run(server, llm, "Quanto custa o Takamine GD20?", "tem desconto no pix?")
+    assert [t.name for t in turns[1].prefetched] == ["simular_pagamento"]
+
+
+async def test_discount_question_without_product_still_reads_the_manual(server):
+    llm = ScriptedLLM([answer("No PIX há 5% de desconto.")])
+    (turn,), _ = await run(server, llm, "o pix tem desconto?")
+    assert [t.name for t in turn.prefetched] == ["consultar_politica"]
 
 
 # ============================================================================ preço sem fonte

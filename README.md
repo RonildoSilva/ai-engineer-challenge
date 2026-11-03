@@ -25,6 +25,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 - [Servidor MCP (a API)](#servidor-mcp-a-api)
 - [Agente](#agente)
 - [Avaliação](#avaliação)
+- [Conversas de exemplo](#conversas-de-exemplo)
 - [Camada de dados](#camada-de-dados)
 - [Escalabilidade e robustez](#escalabilidade-e-robustez)
 - [Modelos locais](#modelos-locais)
@@ -188,13 +189,15 @@ flowchart LR
     H -->|não| X
     H -->|sim| I[cria .env]
     I --> P[emporio pipeline run<br/>incremental · sobe o servidor<br/>de embeddings se preciso]
-    P --> J([pronto])
+    P --> V[verificação rápida<br/>lock · lint · unitários]
+    V --> J([pronto: uv run emporio chat])
 ```
 
 ```bash
 ./scripts/setup.sh                 # tudo (~630 MB de download na primeira vez)
 SKIP_MODEL=1 ./scripts/setup.sh    # sem runtime/modelo local (ex.: usar só API online)
 EVAL_MODELS=1 ./scripts/setup.sh   # + Qwen3-1.7B (1,8 GB), o modelo de comparação da avaliação
+SKIP_CHECK=1 ./scripts/setup.sh    # sem a verificação final (o CI roda o check.sh completo em seguida)
 ```
 
 ## Como rodar
@@ -272,7 +275,7 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>557 testes, ~35 s, offline<br/>+44 com Postgres, job próprio]
+        L2 --> L3[pytest unitário<br/>570 testes, ~35 s, offline<br/>+44 com Postgres, job próprio]
         L3 --> L4[pytest -m integration<br/>9 testes, ~5 min,<br/>sobe os modelos reais]
     end
     K -.-> K2
@@ -303,10 +306,10 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Servidor MCP | exatamente as 8 tools, todas somente leitura e com saída estruturada; nenhuma forma de listar clientes; respostas de cada tool (GD20, promoção sem PIX, alternativas, escopos, pedido verificado e não verificado, devolução, pagamento, frete, horário, políticas); erro esperado amigável, argumento inválido rejeitado, **erro inesperado sem detalhes internos**, **logs sem e-mail/telefone**; resources e prompt; transportes **stdio e HTTP** com subprocesso real (26) | `tests/test_mcp_server.py` |
 | Cliente LLM | perfis do projeto válidos (online marcados como referência), seleção e sobrescritas, **chave de API ausente com erro claro**, contexto lido de `/props` e fallback, temperatura e `max_tokens` do perfil, tools só se suportadas, **normalização de respostas de modelos pequenos** (JSON inválido nos argumentos, cercas de código, tool call escrita como texto, bloco `<think>`), servidor fora do ar e erro 5xx, CLI (25) | `tests/test_llm_client.py` |
 | Detecção de assunto | 16 frases reais com uma intenção e 5 com várias ("quanto custa o GD20 e dá pra fazer em 10x?"), devolução não vira busca de catálogo, assunto desconhecido, subconjunto de tools, "18h"/"12x"/e-mail não viram código de modelo, dados citados (pedido, e-mail, telefone, valor, parcelas, cidade), "meu telefone é…" não é pergunta sobre a loja, **mensagem só com dados herda a intenção**, dados completados pelo histórico, trecho do produto na frase, reclamação (33) | `tests/test_router.py` |
-| Guardrails | **injeção de prompt** (9 frases, PT e EN), **dados de terceiros** (8), **fora do escopo** (6), mensagem longa, **11 perguntas legítimas parecidas que precisam passar**; na saída, contato de terceiros mascarado (loja e o próprio cliente preservados) e persona recitada; no agente: mensagem bloqueada não chega ao LLM nem às tools, reclamação sozinha com resposta pronta e encaminhada, reclamação + troca com orientação, categoria vazia, instrução recitada → correção → resposta de segurança, diretrizes internas e notas de curadoria fora dos dados (15 funções, 47 casos) | `tests/test_guardrails.py` |
+| Guardrails | **injeção de prompt** (9 frases, PT e EN), **dados de terceiros** (8), **fora do escopo** (6), mensagem longa, **11 perguntas legítimas parecidas que precisam passar**; na saída, contato de terceiros mascarado (loja e o próprio cliente preservados) e persona recitada; no agente: mensagem bloqueada não chega ao LLM nem às tools, reclamação sozinha com resposta pronta e encaminhada, reclamação + troca com orientação, categoria vazia, instrução recitada → correção → resposta de segurança, diretrizes internas e notas de curadoria fora dos dados, **turno bloqueado não contamina o seguinte**, e-mail com acento da loja preservado (17 funções, 49 casos) | `tests/test_guardrails.py` |
 | Orçamento de contexto | disponível = janela − resposta − margem, **8k × 128k** (seções e produtos pedidos), seções escolhidas pelo **custo publicado pelo MCP**, tudo cabe em 128k, em 8k o histórico antigo sai primeiro e aos pares, ordem das mensagens, **resultado de tool nunca cortado ao meio**, tools que não cabem saem e são reportadas (9) | `tests/test_budget.py` |
-| Agente | persona e contexto (data de referência, loja aberta) no system prompt, tools do MCP no formato do LLM, loop tool → resultado → resposta, histórico só com perguntas e respostas, argumento inválido / tool inexistente / erro da tool devolvidos ao modelo, **nome de tool quase certo corrigido**, **resposta de segurança** (limite de rodadas, LLM fora do ar, resposta vazia), PII mascarada no rastro, agente via stdio; **pré-busca**: "posso devolver?" em 1 chamada sem tools com a regra dos 7 dias, preço pronto e "sem promoção" explícito, preço do produto alimentando a simulação de 10x, pedido sem dados → pede os dados → pré-busca no turno seguinte, acessório, assunto desconhecido, janela grande; **preço sem fonte**: uma correção e depois resposta de segurança; pedido sem dados respondido sem LLM, pedindo só o que falta (28) | `tests/test_agent.py` |
-| Chat e histórico | e-mail/telefone mascarados ao gravar (pedido e preço preservados), sessão de ida e volta com metadados do turno, janela sempre começando pelo cliente, ordem das sessões e exclusão em cascata, uma conexão por thread, **sessão retomada devolve o histórico e o assunto** ("é o 8, telefone…" continua o pedido), sessão inexistente, `/nova` limpa, transcrição markdown com tools e sem PII, CLI `emporio chat` (conversa, retomada, `--list`, `/nova`, erro) (13) | `tests/test_chat.py` |
+| Agente | persona e contexto (data de referência, loja aberta) no system prompt, tools do MCP no formato do LLM, loop tool → resultado → resposta, histórico só com perguntas e respostas, argumento inválido / tool inexistente / erro da tool devolvidos ao modelo, **nome de tool quase certo corrigido**, **resposta de segurança** (limite de rodadas, LLM fora do ar, resposta vazia), PII mascarada no rastro, agente via stdio; **pré-busca**: "posso devolver?" em 1 chamada sem tools com a regra dos 7 dias, preço pronto e "sem promoção" explícito, preço do produto alimentando a simulação de 10x, pedido sem dados → pede os dados → pré-busca no turno seguinte, acessório, assunto desconhecido, janela grande; **preço sem fonte**: uma correção e depois resposta de segurança; pedido sem dados respondido sem LLM, pedindo só o que falta; **respostas prontas** de acessório, horário (com o semanal) e contato (do manual); pergunta seguinte usa o preço do último produto; desconto com produto em contexto dispensa o manual (36) | `tests/test_agent.py` |
+| Chat e histórico | e-mail/telefone mascarados ao gravar (pedido e preço preservados), sessão de ida e volta com metadados do turno, janela sempre começando pelo cliente, ordem das sessões e exclusão em cascata, uma conexão por thread, **sessão retomada devolve o histórico e o assunto** ("é o 8, telefone…" continua o pedido), sessão inexistente, `/nova` limpa, transcrição markdown com tools e sem PII, CLI `emporio chat` (conversa, retomada, `--list`, `/nova`, erro), turnos bloqueados fora do contexto ao retomar (14) | `tests/test_chat.py` |
 | Avaliação | cenários, intenções e gabarito de busca válidos (rótulos existentes, ids únicos, exemplos do enunciado presentes), **frases da avaliação diferentes das dos testes**, semântica das asserções (sem acento, pontuação preservada, resposta de segurança reprova), **os 18 cenários passam com o oráculo** (o dado certo chega ao modelo), métricas do classificador (precisão/revocação por rótulo) e **piso de 90%**, métricas de busca, resumo regenerado de todos os JSON, CLI `emporio eval` (12) | `tests/test_evals.py` |
 | Postgres + pgvector | **as mesmas suítes de contrato** do `Repository` (22) e do `Retriever` (híbrido sobre pgvector), documentos idênticos aos do SQLite, **ranking do pgvector igual ao do índice SQLite**, filtro por tipo no SQL, conexão somente leitura, injeção de SQL inerte, `CHECK`s equivalentes, carga idempotente, servidor MCP inteiro rodando sobre os dois backends por configuração (44; job `postgres` do CI, contra um Postgres real) | `tests/test_postgres.py` |
 | Deploy | imagens fixadas por digest, uv do Dockerfile igual ao do setup, `.dockerignore` como lista de permissão sem `_raw`/`.env`/modelos, perfis do compose, mesma imagem Postgres no CI e no compose (6); job `docker` do CI constrói a imagem e responde dentro do container | `tests/test_deploy.py` |
@@ -596,9 +599,11 @@ sequenceDiagram
    dados citados (número do pedido, e-mail/telefone, valor, parcelas, cidade). Uma mensagem só com dados
    ("é o 8, telefone …") herda a intenção do turno anterior.
 2. **Pré-busca** (`prefetch.py`): o host chama as tools do assunto via MCP e encadeia valores (o preço do
-   produto encontrado alimenta a simulação de pagamento e o frete). Se a pergunta for só sobre um pedido e
-   faltarem dados, a resposta é um texto pronto, sem LLM, pedindo só o que falta (número do pedido ou
-   e-mail/telefone): com a orientação no prompt, o Bonsai a repetia para o cliente em vez de pedir os dados. Os resultados entram como uma chamada de tools já respondida, numa versão
+   produto encontrado alimenta a simulação de pagamento e o frete; numa pergunta seguinte sem produto, como "e
+   em 10x?", vale o último produto da conversa). **Respostas prontas, sem LLM**, quando o modelo só atrapalharia:
+   pedido ou devolução sem os dados do titular (pede só o que falta), acessório, reclamação, horário e contato
+   (dado puro, lido das tools). Em todas elas o Bonsai errava: repetia a orientação interna, trocava telefone e
+   WhatsApp, respondia "domingo?" com o horário de hoje. Nos demais casos, os resultados entram como uma chamada de tools já respondida, numa versão
    enxuta: os textos prontos (`resposta`, `resumo_preco`), a promoção explícita ("nenhuma; o desconto do
    PIX é forma de pagamento") e as orientações.
 3. **Orçamento de contexto** (`budget.py`): ver [Orçamento de contexto](#orçamento-de-contexto).
@@ -640,7 +645,8 @@ flowchart LR
 | **Dados de terceiros** ("liste os clientes", "qual o e-mail da Ana?", "quem comprou o GD20?") | resposta pronta citando a LGPD; o servidor MCP também não tem tool que liste clientes |
 | **Fora do escopo** explícito (receitas, futebol, política, piadas, programação…) | redireciona para a loja, sem LLM; só se nenhum assunto da loja foi detectado ("violão pra tocar no jogo do Brasil" segue normal) |
 | **Assunto desconhecido** ("vocês têm estacionamento?") | vai ao modelo com 3 tools genéricas; a persona manda recusar com gentileza o que não for da loja |
-| **Acessórios** e **categorias vazias** | a pré-busca traz a orientação do domínio (a loja só vende instrumentos; "no momento não há…") |
+| **Acessórios** e **categorias vazias** | acessório sozinho: resposta pronta, com o item que a tool identificou ("não vendemos palheta nem outros acessórios…"); categoria vazia: a pré-busca traz a orientação do domínio ("no momento não há…") |
+| **Depois de uma recusa** | o turno bloqueado não volta ao contexto do modelo (fica no histórico salvo e na transcrição); antes, o pedido seguinte de violão virou "aqui está a receita de bolo" |
 | **Reclamação** ou pedido de atendimento humano | intenção própria: sozinha, resposta pronta (empatia, registro, retorno em 24 h úteis, WhatsApp); com outro assunto, orientação ao modelo. O turno fica marcado como **encaminhado** no histórico |
 | **Saída: contato de terceiros** | e-mail/telefone que não seja da loja nem citado pelo cliente vira `[dado protegido]` |
 | **Saída: instruções recitadas** (16+ palavras seguidas iguais à persona ou às orientações do turno) | 1 correção, depois resposta de segurança |
@@ -726,24 +732,30 @@ um modelo real é o erro de redação do modelo.
 
 | Perfil | Cenários aprovados | Turnos com LLM | Latência por turno com LLM (p50 · p95) | Prompt médio |
 |---|---|---|---|---|
-| oráculo (sem LLM) | **18/18** | 14/20 | — | 924 tokens |
-| **Qwen3-1.7B** Q8_0 (1,8 GB) | **18/18** | 14/20 | **57 s · 107 s** | 924 tokens |
-| Bonsai-1.7B 1 bit (248 MB, baseline) | 16/18 | 14/20 | 65 s · 177 s | 924 tokens |
+| oráculo (sem LLM) | **18/18** | 12/20 | — | 934 tokens |
+| **Qwen3-1.7B** Q8_0 (1,8 GB) | **18/18** | 13/20 | **68 s · 123 s** | 940 tokens |
+| Bonsai-1.7B 1 bit (248 MB, baseline) | 17/18 | 13/20 | 108 s · 207 s | 940 tokens |
 
-<sub>CPU i5-8265U (4 núcleos), 8k de contexto, mesmo runtime llamafile, mesma pré-busca. 6 dos 20 turnos não
-chamam o LLM (guardrails e respostas prontas).</sub>
+<sub>CPU i5-8265U (4 núcleos), 8k de contexto, mesmo runtime llamafile, mesma pré-busca. Os turnos sem LLM são
+guardrails e respostas prontas. A rodada com os modelos é anterior à resposta pronta de contato (commit 17), por
+isso tem um turno com LLM a mais que o oráculo; as latências desta rodada saíram ~1,5× as da anterior (57 s e 65 s
+de p50) porque a máquina estava mais carregada.</sub>
 
-- **Bonsai falhou em 2:** no `acessorio`, devolveu a orientação interna ("Responda com orientação recebida,
-  sem chamar ferramentas") em vez de explicar que a loja só vende instrumentos; no 2º turno da
-  `devolucao_fora_do_prazo`, recebeu "prazo final 24/02/2026, não elegível" e escreveu "há 0 dias
-  restantes, você pode seguir os próximos passos", sem dizer que o prazo acabou. O oráculo passa nos dois:
-  o dado certo chegou, o erro foi de redação.
-- **Qwen3-1.7B** (mesma arquitetura do Bonsai, sem a quantização de 1 bit) passou em todos e foi mais rápido no
-  p95: a quantização extrema economiza 7× de disco e memória, mas custa qualidade de redação.
-- **Correções feitas durante a avaliação** (registradas no resultado): uma asserção do `produto_esgotado`
-  proibia "está disponível" e reprovava a resposta certa "não está disponível" (corrigida e o turno do Qwen3
-  reavaliado a partir da resposta gravada); e o `.env` local com `LLM_BASE_URL`/`LLM_MODEL` sobrescrevia
-  qualquer perfil (o Qwen3 subiu com o nome do Bonsai; as sobrescritas agora valem só para o perfil ativo).
+- **Bonsai falhou em 1:** no `produto_esgotado`, disse que o Giannini GF-3D "já está disponível", mas ele está
+  esgotado, e a tool disse isso (na rodada anterior ele acertou esse cenário; a temperatura é 0,2). É o erro mais
+  grave que vimos e será coberto por uma pós-checagem de status (próximo commit).
+- **Evolução do Bonsai:** 16/18 na 1ª rodada. As duas falhas eram de redação sobre dados certos: no `acessorio`,
+  repetiu a orientação interna; na devolução fora do prazo, escreveu "há 0 dias restantes" em vez de dizer que o
+  prazo acabou. Depois dos ajustes (acessório com resposta pronta, devolução com "não é mais possível" explícito e
+  sem contador de dias vencido), passou nos dois.
+- **Qwen3-1.7B** (mesma arquitetura do Bonsai, sem a quantização de 1 bit) passou em todos nas duas rodadas e foi
+  mais rápido: a quantização extrema economiza 7× de disco e memória, mas custa qualidade de redação.
+- **Asserções corrigidas depois de ver as respostas** (cada caso registrado como nota no resultado, com a resposta
+  e a falha original): "está disponível" reprovava a resposta certa "não está disponível"; "Não tenho saxofone" e
+  "não há mais tempo para devolver" eram formas certas que a lista não previa. Os turnos foram reavaliados a partir
+  das respostas gravadas, sem rodar o modelo de novo.
+- **`.env` local** com `LLM_BASE_URL`/`LLM_MODEL` sobrescrevia qualquer perfil (na 1ª rodada o Qwen3 subiu com o
+  nome do Bonsai); as sobrescritas agora valem só para o perfil ativo.
 - O oráculo achou **3 falhas de encanamento** antes de qualquer modelo rodar, todas corrigidas: o motivo da
   devolução se perdia quando a mensagem seguinte era só o e-mail; devolução com número do pedido e sem contato
   agora pede só o que falta, sem LLM; e "frete de um pedido de R$ 600" disparava consulta de pedido.
@@ -763,6 +775,24 @@ embeddings):
 |---|---|---|---|---|
 | lexical | 70% | 75% | 0,729 | 0,9 ms |
 | **híbrida** (lexical + embeddinggemma, RRF) | **90%** | **95%** | **0,925** | 71 ms |
+
+## Conversas de exemplo
+
+Cinco conversas com o agente real e o **Bonsai-1.7B**, sem edição, comentadas turno a turno em
+[`examples/README.md`](examples/README.md) (onde o modelo erra, o comentário diz o quê). Regravar:
+`./scripts/record_examples.sh` (ou `PROFILE=qwen3-1.7b …`).
+
+| # | Conversa | Destaque |
+|---|---|---|
+| [01](examples/01_catalogo_ate_1000.md) | Violões até R$ 1.000 → Tagima Memphis em 3x | exemplo do enunciado; preço do produto encontrado alimenta a simulação |
+| [02](examples/02_endereco_horario.md) | Endereço → abrem no domingo? | contato e horário como dado puro, respostas prontas |
+| [03](examples/03_preco_gd20.md) | GD20 → 10x no cartão → desconto no PIX | pergunta do enunciado; turnos seguintes sem citar o produto |
+| [04](examples/04_devolucao.md) | Devolução do pedido 7 (arrependimento → defeito) | **não trivial**: verificação do titular, prazos vencidos, caminho da garantia |
+| [05](examples/05_fora_do_escopo_acessorios.md) | Palheta → corda → receita de bolo → violão para iniciante | acessórios, fora do escopo e retomada depois da recusa |
+
+As gravações também serviram de teste: as primeiras expuseram quatro bugs do agente (turno recusado contaminando
+o seguinte, manual demais junto da simulação de pagamento, horário e contato mal respondidos), corrigidos com
+testes antes da versão final.
 
 ## Camada de dados
 
@@ -921,7 +951,7 @@ OpenAI; trocar de modelo é mudar `LLM_PROFILE`, sem tocar no código.
 | Perfil | Modelo | Contexto | Status |
 |---|---|---|---|
 | `bonsai` (padrão) | Bonsai-1.7B local, llamafile | `auto` (lido de `/props`: 8192) | ✅ testado; sobe sozinho se estiver fora do ar |
-| `qwen3-1.7b` | Qwen3-1.7B Q8_0 local, llamafile, porta 8082 (download opcional: `EVAL_MODELS=1`) | `auto` | ✅ testado na avaliação: 18/18 cenários × 16/18 do Bonsai |
+| `qwen3-1.7b` | Qwen3-1.7B Q8_0 local, llamafile, porta 8082 (download opcional: `EVAL_MODELS=1`) | `auto` | ✅ testado na avaliação: 18/18 cenários × 17/18 do Bonsai |
 | `ollama-qwen2.5-3b` | Qwen2.5 3B via Ollama | 32768 | referência (Ollama não instalado aqui) |
 | `anthropic` | Claude Haiku (endpoint compatível com OpenAI) | 128000 | referência (precisa de `ANTHROPIC_API_KEY`) |
 | `openai` | `OPENAI_MODEL` | 128000 | referência (precisa de `OPENAI_API_KEY`) |
@@ -1014,7 +1044,7 @@ flowchart TD
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR
-        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::done --> C17["17 · exemplos"]:::next --> CX["19–21 · Airflow,<br/>REST, UI"] --> C18["README final"]
+        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::done --> C17["17 · exemplos"]:::done --> CX["19–21 · Airflow,<br/>REST, UI"] --> C18["README final"]
     end
     F1 --> F2 --> F3 --> F4 --> F5
     classDef next fill:#fde68a,stroke:#b45309,color:#000
@@ -1036,7 +1066,7 @@ docs/            relatório de dados (data_report.md), avaliação de embeddings
                  workflow com IA (planejado)
 evals/           cenários, gabaritos e resultados (evals/resultados/README.md)
 deploy/          Dockerfile e docker-compose (padrão e perfil scale com Postgres + pgvector)
-examples/        conversas de exemplo                             (planejado)
+examples/        5 conversas com o Bonsai, comentadas (examples/README.md)
 models/          manifest.tsv (versionado) + binários (não versionados)
 scripts/         setup, verificação (check.sh), download de modelos, start do llamafile, smoke test,
                  exploração dos dados (explore_data.py), avaliação de embeddings (eval_embeddings.py)
@@ -1061,6 +1091,9 @@ tests/           testes automatizados (unitários + integração com o LLM local
 - A detecção de assunto é por palavras-chave: uma pergunta com vocabulário fora das listas cai no assunto
   "geral", e aí o modelo decide com 3 tools genéricas (e acerta tool calling só em parte dos casos).
 - A checagem de preço sem fonte confere valores em R$, não outros números (prazos, percentuais).
+- O Bonsai ainda erra a redação em parte das respostas: trocou o nome de um produto ("Ryuzan" no lugar de
+  "Rozini", com o preço certo) e acrescentou uma frase sem sentido numa devolução (ver `examples/README.md`). A
+  checagem de preço pega valores inventados; nomes de produto não são checados.
 - Os guardrails de entrada são por padrões de texto: uma injeção reescrita com outras palavras passa por
   eles. A defesa em profundidade é o resto da arquitetura: as tools são somente leitura, os pedidos exigem a
   verificação do titular, nenhuma tool lista clientes e a saída tem contatos de terceiros mascarados.

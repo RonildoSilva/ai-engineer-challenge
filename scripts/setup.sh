@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Setup reprodutível do projeto: verifica pré-requisitos, instala dependências
-# travadas (uv.lock), baixa runtime + modelo baseline com checksum, cria o .env
-# e executa o pipeline de dados.
+# travadas (uv.lock), baixa runtime + modelos com checksum, cria o .env, executa o
+# pipeline de dados e termina com a verificação rápida (lint + testes unitários).
 #
 # Uso:  ./scripts/setup.sh            (tudo)
 #       SKIP_MODEL=1 ./scripts/setup.sh   (sem baixar o modelo local)
 #       EVAL_MODELS=1 ./scripts/setup.sh  (+ Qwen3-1.7B, modelo de comparação da avaliação)
+#       SKIP_CHECK=1 ./scripts/setup.sh   (sem a verificação final; o CI roda o check.sh completo depois)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -63,7 +64,13 @@ fi
 uv run --locked emporio pipeline run
 ok "pipeline de dados em dia (linhagem em data/processed/manifest.json)"
 
+# 7. Verificação rápida: lock, lint e testes unitários (~40 s). A integração com os modelos reais
+#    fica no ./scripts/check.sh completo.
+if [[ -z "${SKIP_CHECK:-}" ]]; then
+  FAST=1 ./scripts/check.sh
+fi
+
 echo
-echo "Pronto. Próximos passos:"
-echo "  ./scripts/start_llamafile.sh                 # terminal 1"
-echo "  uv run python scripts/smoke_llm.py           # terminal 2"
+echo "Pronto. Para conversar com a Mel (sobe o LLM e os embeddings sozinho):"
+echo "  uv run emporio chat"
+echo "Verificação completa, com os modelos reais: ./scripts/check.sh"

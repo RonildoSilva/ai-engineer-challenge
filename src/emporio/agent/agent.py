@@ -115,6 +115,7 @@ class Agent:
         self.routing = routing  # False: sem pré-busca, todas as tools (comportamento do commit 11)
         self.messages: list[dict[str, Any]] = []
         self.last_route: Route | None = None
+        self.last_price: tuple[float, bool] | None = None  # último produto encontrado
 
     async def start(self, customer_first_name: str | None = None) -> None:
         """Monta o system prompt: persona (prompt MCP) + contexto do momento (tool status_loja)."""
@@ -152,10 +153,14 @@ class Agent:
             turn.fallback = f"LLM indisponível: {e}"
             turn.answer = FALLBACK_ANSWER
         turn.latency_s = time.perf_counter() - t0
-        self.messages += [
-            {"role": "user", "content": user_message},
-            {"role": "assistant", "content": turn.answer},
-        ]
+        if not turn.guardrail:
+            # mensagem bloqueada (fora do escopo, injeção…) não entra no contexto do modelo: depois
+            # de recusar a receita de bolo, o Bonsai respondeu "aqui está a receita" ao pedido
+            # seguinte. Ela continua no histórico salvo e na transcrição.
+            self.messages += [
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": turn.answer},
+            ]
         log.info(
             "turno concluído",
             extra={
@@ -189,7 +194,10 @@ class Agent:
             if turn.route.has(Intent.RECLAMACAO):
                 turn.escalated = True
                 log.warning("atendimento encaminhado à equipe", extra={"motivo": "reclamação"})
-            pf = await run_prefetch(turn.route, user_message, self.toolbox, self.budget)
+            pf = await run_prefetch(
+                turn.route, user_message, self.toolbox, self.budget, self.last_price
+            )
+            self.last_price = pf.product_price or self.last_price
             direct = pf.direct_answer
             turn.prefetched = [
                 ToolTrace(c.name, _masked(c.arguments), c.result.ok, c.content, 0.0)
@@ -337,6 +345,7 @@ class Agent:
     def reset(self) -> None:
         self.messages = []
         self.last_route = None
+        self.last_price = None
 
 
 LARGE_WINDOW = 16_000  # a partir daqui, as tools do assunto vão junto mesmo com a pré-busca

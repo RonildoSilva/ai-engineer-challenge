@@ -217,3 +217,13 @@ def test_shell_scripts_are_valid_and_executable(script):
 def test_gitignore(path, ignored):
     result = run(["git", "check-ignore", "-q", "--no-index", path])
     assert (result.returncode == 0) is ignored
+
+
+def test_setup_ends_with_quick_check_and_ci_skips_it():
+    """Um comando para tudo: o setup termina verificando; o CI evita rodar duas vezes."""
+    setup = (SCRIPTS / "setup.sh").read_text()
+    assert "FAST=1 ./scripts/check.sh" in setup
+    assert 'if [[ -z "${SKIP_CHECK:-}" ]]' in setup
+    assert "uv run emporio chat" in setup  # próximo passo indicado ao final
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "SKIP_CHECK=1 ./scripts/setup.sh" in ci

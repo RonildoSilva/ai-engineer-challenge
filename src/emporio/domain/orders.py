@@ -155,8 +155,9 @@ class OrderService:
         if kind is None:
             return ReturnAssessment(
                 verified=True,
-                message="Pergunte o motivo: arrependimento (desistência), defeito ou troca por "
-                "preferência (cor, modelo, tamanho). Os prazos são diferentes.",
+                message="Para avaliar, me conta o motivo: você desistiu da compra, o produto veio "
+                "com defeito ou quer trocar por outro modelo, cor ou tamanho? Os prazos são "
+                "diferentes em cada caso.",
             )
         if order.status == "cancelled":
             return ReturnAssessment(
@@ -198,8 +199,8 @@ class OrderService:
         ]
         after = [
             (
-                "Fora do prazo de arrependimento. Se houver defeito, ainda pode valer a troca por "
-                "defeito ou a garantia: pergunte se o produto apresenta algum problema."
+                "Se o produto tiver algum defeito, ainda pode valer a troca por defeito (até 30 "
+                "dias após a compra) ou a garantia: é só contar o que aconteceu."
             )
         ]
         return ReturnAssessment(
@@ -209,10 +210,10 @@ class OrderService:
             rule="Arrependimento: até 7 dias corridos após o recebimento, sem justificativa "
             "(§4.1).",
             deadline=deadline,
-            days_left=max(left, 0),
+            days_left=left if ok else None,  # "0 dias restantes" virava "ainda dá" no modelo
             conditions=conditions if ok else [],
             next_steps=[] if ok else after,
-            message=self._deadline_text(deadline, left),
+            message=self._deadline_text(deadline, left, "devolução por arrependimento"),
         )
 
     def _defect(self, order: Order) -> ReturnAssessment:
@@ -228,7 +229,7 @@ class OrderService:
                 conditions=[
                     "Não cobre mau uso, quedas, umidade excessiva ou modificações não autorizadas."
                 ],
-                message=self._deadline_text(deadline, left),
+                message=self._deadline_text(deadline, left, "troca por defeito"),
             )
         legal_end, legal_left = self._window(self._received(order), LEGAL_WARRANTY_DAYS)
         steps = ["A troca direta na loja (30 dias) já passou: o caminho é a garantia (§4.2, §8)."]
@@ -247,7 +248,7 @@ class OrderService:
             eligible=False,
             rule="Troca por defeito: até 30 dias após a compra; depois, garantia (§4.2, §8).",
             deadline=deadline,
-            days_left=0,
+            days_left=None,
             conditions=[
                 (
                     "A garantia não cobre desgaste natural, mau uso, quedas ou reparos por "
@@ -255,7 +256,8 @@ class OrderService:
                 )
             ],
             next_steps=steps,
-            message=f"O prazo de troca por defeito terminou em {deadline:%d/%m/%Y}.",
+            message=f"O prazo de troca direta por defeito terminou em {deadline:%d/%m/%Y}: o "
+            "caminho agora é a garantia.",
         )
 
     def _preference(self, order: Order) -> ReturnAssessment:
@@ -273,16 +275,22 @@ class OrderService:
             rule="Troca por preferência (cor, modelo, tamanho): até 7 dias, se houver o produto "
             "desejado (§4.3).",
             deadline=deadline,
-            days_left=max(left, 0),
+            days_left=left if ok else None,
             conditions=conditions if ok else [],
-            message=self._deadline_text(deadline, left),
+            message=self._deadline_text(deadline, left, "troca por preferência"),
         )
 
     @staticmethod
-    def _deadline_text(deadline: date, left: int) -> str:
+    def _deadline_text(deadline: date, left: int, what: str) -> str:
+        """Texto para o cliente; fora do prazo diz explicitamente que não é mais possível."""
         if left >= 0:
-            return f"Dentro do prazo: vai até {deadline:%d/%m/%Y} ({left} dias restantes)."
-        return f"Fora do prazo: terminou em {deadline:%d/%m/%Y} ({-left} dias atrás)."
+            return (
+                f"Dentro do prazo: a {what} vale até {deadline:%d/%m/%Y} ({left} dias restantes)."
+            )
+        return (
+            f"Fora do prazo: a {what} valia até {deadline:%d/%m/%Y} (terminou há {-left} dias), "
+            "então não é mais possível por esse motivo."
+        )
 
     # ------------------------------------------------------------------ apoio
 

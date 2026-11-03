@@ -58,6 +58,18 @@ def test_window_returns_latest_messages_starting_with_the_customer(store):
     assert store.messages(sid, window=0) == []
 
 
+def test_resume_skips_turns_blocked_by_guardrails(store):
+    sid = store.create_session("bonsai")
+    store.append(sid, "user", "qual a receita de bolo?")
+    store.append(sid, "assistant", "Esse assunto foge…", {"guardrail": "fora_do_escopo"})
+    store.append(sid, "user", "tem violão?")
+    store.append(sid, "assistant", "Temos sim.", {"guardrail": None})
+    assert [m["content"] for m in store.messages(sid, skip_blocked=True)] == [
+        "tem violão?", "Temos sim.",
+    ]  # fmt: skip
+    assert len(store.messages(sid)) == 4  # o histórico salvo continua completo
+
+
 def test_sessions_most_recent_first_and_delete_cascades(store):
     a, b = store.create_session("bonsai"), store.create_session("bonsai")
     store.append(a, "user", "oi")

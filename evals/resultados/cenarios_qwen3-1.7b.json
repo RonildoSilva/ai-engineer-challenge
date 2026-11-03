@@ -1,5 +1,5 @@
 {
-  "gerado_em": "2026-11-03T13:32:19-03:00",
+  "gerado_em": "2026-11-03T15:44:09-03:00",
   "perfil": "qwen3-1.7b",
   "modelo": "qwen3-1.7b",
   "cenarios": 18,
@@ -7,10 +7,10 @@
   "taxa_aprovacao": 1.0,
   "falhas_de_assercao": 0,
   "turnos": 20,
-  "turnos_com_llm": 14,
-  "latencia_llm_p50_s": 56.9,
-  "latencia_llm_p95_s": 107.0,
-  "prompt_tokens_medio": 924,
+  "turnos_com_llm": 13,
+  "latencia_llm_p50_s": 67.8,
+  "latencia_llm_p95_s": 122.5,
+  "prompt_tokens_medio": 940,
   "cenarios_detalhe": [
     {
       "id": "preco_gd20",
@@ -23,7 +23,7 @@
           "answer": "R$ 2.199,00 (ou R$ 2.089,05 no PIX, 5% de desconto).",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 58.21,
+          "latency_s": 67.2,
           "prompt_tokens": 758,
           "tools": [
             "detalhar_produto*"
@@ -42,7 +42,7 @@
           "answer": "Hmm, aqui estão alguns violões até R$1000:\n\n1. **Tagima Memphis AC-39 Nylon Natural** - R$ 429,90 (ou R$ 408,40 no PIX, 5% de desconto)\n2. **Rozini RC-104 Nylon Estudante** - R$ 459,90 (ou R$ 436,90 no PIX, 5% de desconto)\n3. **Shelby SN-100 Folk Aço Preto** - R$ 549,00 (ou R$ 521,55 no PIX, 5% de desconto)\n4. **Giannini GF-1R Aço Folk Sunburst** - R$ 579,90 (ou R$ 550,90 no PIX, 5% de desconto)\n5. **Yamaha C40 Nylon Natural** - R$ 599,90 (ou R$ 569,90 no PIX, 5% de desconto)\n\nQuer ver mais opções? 😊",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 107.61,
+          "latency_s": 139.11,
           "prompt_tokens": 920,
           "tools": [
             "buscar_produtos*"
@@ -58,10 +58,10 @@
       "turnos": [
         {
           "user": "quanto custa o GD20 e dá pra fazer em 10x?",
-          "answer": "GD20 custa R$ 2.199,00 (ou R$ 2.089,05 no PIX, 5% de desconto). Pago em 10x sem juros: R$ 219,90 por parcela. PIX: R$ 2.089,05 (5% de desconto). Dá para combinar formas de pagamento.",
+          "answer": "R$ 2.199,00 à vista ou 10x sem juros de R$ 219,90. PIX: R$ 2.089,05 (5% de desconto). Dá para combinar formas de pagamento.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 64.64,
+          "latency_s": 67.8,
           "prompt_tokens": 971,
           "tools": [
             "detalhar_produto*",
@@ -81,7 +81,7 @@
           "answer": "O ukulele Kalani KAL-700T está disponível por R$ 323,10 na promoção Oferta Especial (10% de desconto sobre R$ 359,00). O desconto do PIX não se soma à promoção.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 68.98,
+          "latency_s": 84.89,
           "prompt_tokens": 1158,
           "tools": [
             "detalhar_produto*",
@@ -101,7 +101,7 @@
           "answer": "Tem o violão Giannini GF-3D? Não está disponível no momento. Mas temos outros modelos disponíveis, como o GNF-3 CEQ Elétrico Nylon Natural, o GF-1R Aço Folk Sunburst, o GWNE-7 7 Cordas Nylon Natural, o GN-15 Nylon Cedr Natural e o Takamine GC5CE Elétrico Nylon Natural. Quer saber mais sobre algum deles?",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 78.33,
+          "latency_s": 101.51,
           "prompt_tokens": 1157,
           "tools": [
             "detalhar_produto*",
@@ -118,10 +118,10 @@
       "turnos": [
         {
           "user": "vocês têm saxofone?",
-          "answer": "Não tenho saxofones no momento. Pode me dizer qual tipo você busca? Estou aqui para ajudar com outras categorias! 🎶",
+          "answer": "Não tenho saxofones no momento. Informe com transparência e ofereça ajuda com outras categorias. 😊",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 16.83,
+          "latency_s": 21.18,
           "prompt_tokens": 696,
           "tools": [
             "buscar_produtos*"
@@ -137,11 +137,11 @@
       "turnos": [
         {
           "user": "vocês vendem palheta?",
-          "answer": "Não vendemos acessórios, como cordas, palhetas, cabos, cases, pedais ou amplificadores. Só vendemos instrumentos musicais. Se você precisa de uma palheta, recomendo procurar uma loja parceira. 😊",
+          "answer": "Aqui na Empório da Música a gente trabalha só com instrumentos musicais, então não vendemos palheta nem outros acessórios (cordas, cabos, cases, pedais, amplificadores). Mas se você estiver procurando um instrumento, posso te ajudar a escolher! 🎸",
           "failures": [],
-          "llm_calls": 1,
-          "latency_s": 25.54,
-          "prompt_tokens": 720,
+          "llm_calls": 0,
+          "latency_s": 0.0,
+          "prompt_tokens": 698,
           "tools": [
             "buscar_produtos*"
           ]
@@ -168,7 +168,7 @@
           "answer": "Pedido #8 de 15/02/2026: enviado. Itens: 1× Kala KA-C Concert Mogno. Total: R$ 349,90 (cartão de débito). Rastreio: BRJL5544332BR (Correios ou Jadlog); previsão de entrega 28/02/2026. A previsão de entrega (28/02/2026) já passou: vamos registrar o caso e a equipe vai verificar com a transportadora, com retorno em até 24 horas úteis. 😊",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 65.64,
+          "latency_s": 80.0,
           "prompt_tokens": 825,
           "tools": [
             "consultar_pedido*"
@@ -184,10 +184,10 @@
       "turnos": [
         {
           "user": "quero saber do pedido 8, meu telefone é (67) 91111-2222",
-          "answer": "O pedido 8 não foi encontrado com esse telefone. Confira o número do pedido e use o e-mail ou telefone que você cadastrou na compra. Se precisar de ajuda com algo mais, só me dizer! 🎵",
+          "answer": "O pedido 8 não foi encontrado com esse telefone. Confira o número do pedido e use o e-mail ou telefone cadastrados na compra. Se precisar de ajuda com algo else, estou aqui! 🎵",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 23.25,
+          "latency_s": 23.85,
           "prompt_tokens": 683,
           "tools": [
             "consultar_pedido*"
@@ -206,7 +206,7 @@
           "answer": "Certo, pedido 7! Para confirmar que é você, me informa o e-mail ou o telefone usado na compra?",
           "failures": [],
           "llm_calls": 0,
-          "latency_s": 0.24,
+          "latency_s": 0.35,
           "prompt_tokens": 1137,
           "tools": [
             "consultar_politica*"
@@ -214,11 +214,11 @@
         },
         {
           "user": "leticia.rocha@jmail.com",
-          "answer": "Fora do prazo! O arrependimento só pode ser feito até 7 dias corridos após o recebimento. Se houver defeito, pode valer a troca ou a garantia. Pergunte se o produto apresenta algum problema.",
+          "answer": "Fora do prazo: a devolução por arrependimento valia até 24/02/2026 (terminou há 29 dias), então não é mais possível por esse motivo. Se quiser, pode tentar outra forma de devolução, como troca ou garantia. Quer ajuda com algo mais?",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 33.1,
-          "prompt_tokens": 807,
+          "latency_s": 63.02,
+          "prompt_tokens": 819,
           "tools": [
             "verificar_devolucao*"
           ]
@@ -233,10 +233,10 @@
       "turnos": [
         {
           "user": "posso devolver?",
-          "answer": "Posso devolver! Segue a política da Empório da Música:\n\n- **7 dias corridos** após o recebimento do produto, sem necessidade de justificativa.\n- O produto deve estar na embalagem original, sem sinais de uso, com todos os acessórios e manuais.\n- O reembolso é feito na mesma forma de pagamento original em até 10 dias úteis.\n- O frete de devolução é por conta da loja.\n\nSe quiser, posso ajudar com a devolução ou troca! 😊",
+          "answer": "Posso devolver! Comprando online, você tem direito a um **arrependimento em até 7 dias corridos**. O produto deve estar na embalagem original, sem sinais de uso, com todos os acessórios e manuais. O reembolso é feito na mesma forma de pagamento original em até 10 dias úteis. O frete de devolução é por conta da loja.\n\nQuer que eu te ajude a fazer a devolução?",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 106.61,
+          "latency_s": 111.35,
           "prompt_tokens": 1329,
           "tools": [
             "consultar_politica*"
@@ -255,7 +255,7 @@
           "answer": "O PIX tem desconto de 5% à vista.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 47.55,
+          "latency_s": 72.77,
           "prompt_tokens": 1152,
           "tools": [
             "consultar_politica*"
@@ -271,10 +271,10 @@
       "turnos": [
         {
           "user": "quanto fica o frete pra Campo Grande de um pedido de R$ 600?",
-          "answer": "Frete para Campo Grande: grátis. Entrega por motoboy, 1 a 3 dias úteis. Seguro contra extravio e danos. A loja liga antes de entregar.",
+          "answer": "Frete para Campo Grande: grátis! Entrega por motoboy, 1 a 3 dias úteis. Seguro contra extravio e danos. A loja liga antes de entregar.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 22.48,
+          "latency_s": 34.8,
           "prompt_tokens": 739,
           "tools": [
             "calcular_frete*"
@@ -293,7 +293,7 @@
           "answer": "@nome, a Empório da Música está localizada na Rua 14 de Maio, 3200 — Centro, Campo Grande - MS, CEP 79202-333. Contato pelo WhatsApp: (67) 3321-4500.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 55.5,
+          "latency_s": 67.75,
           "prompt_tokens": 1017,
           "tools": [
             "consultar_politica*"
@@ -369,9 +369,5 @@
         }
       ]
     }
-  ],
-  "notas": [
-    "produto_esgotado reavaliado após a rodada (asserção corrigida): [\"nenhum de ['esgotado', 'indisponivel', 'sem estoque']\", \"não podia conter 'esta disponivel'\"] → []",
-    "rótulo 'modelo' corrigido: a rodada enviou o nome 'bonsai' porque LLM_MODEL/LLM_BASE_URL do .env local valiam para todos os perfis (corrigido); o servidor carregou Qwen3-1.7B-Q8_0.gguf (log do llamafile)"
   ]
 }

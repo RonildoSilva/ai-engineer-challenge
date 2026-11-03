@@ -30,7 +30,10 @@ from emporio.data.rules import normalize
 
 MAX_INPUT_CHARS = 2000
 
-STORE_CONTACTS = ("3341-4444", "3321-4500", "contato@emporiodamusica.com.br")
+# o manual grafa o e-mail com e sem acento (§1.2 × capa); as duas formas são da loja
+STORE_CONTACTS = (
+    "3341-4444", "3321-4500", "contato@emporiodamusica.com.br", "contato@empóriodamusica.com.br",
+)  # fmt: skip
 
 
 class Block(StrEnum):

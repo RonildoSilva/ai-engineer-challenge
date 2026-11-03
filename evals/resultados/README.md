@@ -6,9 +6,9 @@ Gerado por `uv run emporio eval …` a partir dos JSON desta pasta (não editar 
 
 | Perfil | Modelo | Cenários aprovados | Falhas de asserção | Turnos com LLM | Latência p50 | Latência p95 | Prompt médio |
 |---|---|---|---|---|---|---|---|
-| oraculo | nenhum (devolve os dados) | 18/18 (100%) | 0 | 14/20 | 0.0 s | 0.1 s | 924 tokens |
-| bonsai | bonsai | 16/18 (89%) | 2 | 14/20 | 64.8 s | 176.9 s | 924 tokens |
-| qwen3-1.7b | qwen3-1.7b | 18/18 (100%) | 0 | 14/20 | 56.9 s | 107.0 s | 924 tokens |
+| oraculo | nenhum (devolve os dados) | 18/18 (100%) | 0 | 12/20 | 0.0 s | 0.1 s | 934 tokens |
+| bonsai | bonsai | 17/18 (94%) | 1 | 13/20 | 107.7 s | 207.4 s | 940 tokens |
+| qwen3-1.7b | qwen3-1.7b | 18/18 (100%) | 0 | 13/20 | 67.8 s | 122.5 s | 940 tokens |
 
 Por cenário (✅ passou · ❌ falhou):
 
@@ -18,12 +18,12 @@ Por cenário (✅ passou · ❌ falhou):
 | `catalogo_ate_1000` | ✅ | ✅ | ✅ |
 | `produto_e_parcelas` | ✅ | ✅ | ✅ |
 | `promocao_ativa` | ✅ | ✅ | ✅ |
-| `produto_esgotado` | ✅ | ✅ | ✅ |
+| `produto_esgotado` | ✅ | ❌ | ✅ |
 | `categoria_vazia` | ✅ | ✅ | ✅ |
-| `acessorio` | ✅ | ❌ | ✅ |
+| `acessorio` | ✅ | ✅ | ✅ |
 | `pedido_em_duas_mensagens` | ✅ | ✅ | ✅ |
 | `pedido_contato_errado` | ✅ | ✅ | ✅ |
-| `devolucao_fora_do_prazo` | ✅ | ❌ | ✅ |
+| `devolucao_fora_do_prazo` | ✅ | ✅ | ✅ |
 | `posso_devolver` | ✅ | ✅ | ✅ |
 | `pix` | ✅ | ✅ | ✅ |
 | `frete_gratis` | ✅ | ✅ | ✅ |
@@ -35,13 +35,12 @@ Por cenário (✅ passou · ❌ falhou):
 
 Falhas de `bonsai`:
 
-- `acessorio` · "vocês vendem palheta?": nenhum de ['instrumentos musicais', 'somente instrumentos', 'apenas instrumentos', 'so instrumentos', 'exclusivamente']
-- `devolucao_fora_do_prazo` · "leticia.rocha@jmail.com": nenhum de ['fora do prazo', 'prazo terminou', 'terminou', 'encerrou', 'expirou', 'passou']
+- `produto_esgotado` · "tem o violão Giannini GF-3D?": nenhum de ['esgotado', 'indisponivel', 'sem estoque', 'nao esta disponivel']
 
-Notas de `qwen3-1.7b`:
+Notas de `bonsai`:
 
-- produto_esgotado reavaliado após a rodada (asserção corrigida): ["nenhum de ['esgotado', 'indisponivel', 'sem estoque']", "não podia conter 'esta disponivel'"] → []
-- rótulo 'modelo' corrigido: a rodada enviou o nome 'bonsai' porque LLM_MODEL/LLM_BASE_URL do .env local valiam para todos os perfis (corrigido); o servidor carregou Qwen3-1.7B-Q8_0.gguf (log do llamafile)
+- categoria_vazia reavaliado após a rodada (asserção ampliada com forma equivalente; resposta: "Não tenho saxofone. Você pode me perguntar sobre outros instrumentos da categoria Instrume…"): ["nenhum de ['nao ha', 'nao temos', 'no momento', 'nao trabalhamos', 'nao possui', 'nao tem']"] → []
+- devolucao_fora_do_prazo reavaliado após a rodada (asserção ampliada com forma equivalente; resposta: "Fui verificada, e o motivo é arrependimento. O prazo final é 24/02/2026, e não há mais tem…"): ["nenhum de ['fora do prazo', 'prazo terminou', 'terminou', 'encerrou', 'expirou', 'passou']"] → []
 
 ## Classificador de intenção e guardrails (evals/intents.yaml)
 

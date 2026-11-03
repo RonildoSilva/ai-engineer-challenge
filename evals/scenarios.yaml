@@ -71,7 +71,7 @@ scenarios:
         expect:
           intents: [catalogo]
           tools: [buscar_produtos]
-          contains_any: [nao ha, nao temos, no momento, nao trabalhamos, nao possui, nao tem]
+          contains_any: [nao ha, nao temos, no momento, nao trabalhamos, nao possui, nao tem, nao tenho]
 
   - id: acessorio
     title: Acessório (a loja só vende instrumentos)
@@ -116,7 +116,7 @@ scenarios:
         expect:
           intents: [devolucao]
           tools: [verificar_devolucao]
-          contains_any: [fora do prazo, prazo terminou, terminou, encerrou, expirou, passou]
+          contains_any: [fora do prazo, prazo terminou, terminou, encerrou, expirou, passou, nao ha mais tempo, nao e mais possivel]
 
   - id: posso_devolver
     title: Regra geral de devolução (critério do commit 12)

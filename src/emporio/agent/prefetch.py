@@ -23,7 +23,7 @@ from typing import Any
 
 from emporio.agent.budget import ContextBudget
 from emporio.agent.mcp_client import McpToolbox, ToolResult
-from emporio.agent.router import TOOLS, Intent, Route, product_query
+from emporio.agent.router import TOOLS, Intent, Route, policy_terms, product_query
 
 ASK_ORDER_DATA = (
     "Para consultar um pedido, peça ao cliente o número do pedido e o e-mail ou telefone "
@@ -84,9 +84,57 @@ COMPLAINT = (
     "retorna em até 24 horas úteis, e informe o WhatsApp (67) 3321-4500. Se ele citar um pedido "
     "sem os dados, peça o número do pedido e o e-mail ou telefone da compra."
 )
-NO_TOOL_ANSWER = (
-    "A loja não vende acessórios; responda com a orientação recebida, sem chamar ferramentas."
-)
+
+
+DISCOUNT_WORDS = frozenset({"desconto", "descontos", "promocao", "promocoes", "oferta", "ofertas"})
+
+
+CONTACT_WORDS = frozenset({
+    "endereco", "onde fica", "localizacao", "como chegar", "telefone", "whatsapp", "contato",
+    "email da loja", "instagram", "site",
+})  # fmt: skip
+_CONTACT_FIELDS = (("Endereço", "Endereço"), ("Telefone", "Telefone"),
+                   ("WhatsApp", "WhatsApp (atendimento)"), ("E-mail", "E-mail"))  # fmt: skip
+
+
+def contact_reply(data: dict[str, Any]) -> str | None:
+    """Resposta pronta de contato, lida da tabela da seção "sobre_contato" do manual (via MCP)."""
+    section = next((s for s in data.get("secoes", []) if s.get("id") == "sobre_contato"), None)
+    if section is None:
+        return None
+    rows = {}
+    for line in section.get("conteudo", "").splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) == 2:  # noqa: PLR2004 (tabela campo | valor)
+            rows[cells[0]] = cells[1]
+    found = [
+        f"{label}: {value}"
+        for prefix, label in _CONTACT_FIELDS
+        if (value := next((v for k, v in rows.items() if k.startswith(prefix)), None))
+    ]
+    if len(found) < 2:  # noqa: PLR2004 (tabela não reconhecida: deixa o modelo responder)
+        return None
+    return "Aqui estão os contatos da Empório da Música 🎸 " + " · ".join(found) + "."
+
+
+def hours_reply(data: dict[str, Any]) -> str:
+    """Resposta pronta de horário: situação agora + horário da semana + datas especiais."""
+    parts = [data.get("resposta", ""), f"Nosso horário: {data.get('horario_semanal', '')}"]
+    if note := data.get("orientacao"):
+        parts.append(note)
+    return " ".join(p.strip() for p in parts if p).strip()
+
+
+def accessory_reply(item: str | None) -> str:
+    """Resposta pronta para pedido só de acessório (o Bonsai recitava a orientação interna)."""
+    # o termo vem como o cliente escreveu ("palheta", "afinador"): "não vendemos palheta" soa
+    # natural; pluralizar à mão errava ("afinadors")
+    what = f"{item} nem outros acessórios" if item else "acessórios"
+    return (
+        f"Aqui na Empório da Música a gente trabalha só com instrumentos musicais, então não "
+        f"vendemos {what} (cordas, cabos, cases, pedais, amplificadores). "
+        "Mas se você estiver procurando um instrumento, posso te ajudar a escolher! 🎸"
+    )
 
 
 @dataclass(frozen=True)
@@ -105,6 +153,9 @@ class Prefetch:
     # resposta pronta, sem LLM: só falta o cliente informar dados (o modelo pequeno repetia a
     # orientação interna para o cliente em vez de pedir os dados)
     direct_answer: str | None = None
+    # (valor, em promoção) do produto encontrado neste turno: o agente o guarda para perguntas
+    # seguintes sem o nome do produto ("e dá pra fazer em 10x?")
+    product_price: tuple[float, bool] | None = None
 
     def messages(self) -> list[dict[str, Any]]:
         """Mensagens de chat no formato de uma chamada de tools já respondida."""
@@ -139,10 +190,20 @@ class Prefetch:
 
 
 async def run_prefetch(
-    route: Route, text: str, toolbox: McpToolbox, budget: ContextBudget
+    route: Route,
+    text: str,
+    toolbox: McpToolbox,
+    budget: ContextBudget,
+    context_price: tuple[float, bool] | None = None,
 ) -> Prefetch:
-    """Executa as chamadas do assunto detectado, encadeando valores quando preciso."""
-    return await _Planner(route, text, toolbox, budget).run()
+    """Executa as chamadas do assunto detectado, encadeando valores quando preciso.
+
+    `context_price`: preço do último produto encontrado na conversa, usado por pagamento/frete
+    quando a mensagem não traz produto nem valor.
+    """
+    planner = _Planner(route, text, toolbox, budget)
+    planner.context_price = context_price
+    return await planner.run()
 
 
 class _Planner:
@@ -152,6 +213,7 @@ class _Planner:
         self.route, self.text, self.toolbox, self.budget = route, text, toolbox, budget
         self.pf = Prefetch()
         self.price: tuple[float, bool] | None = None  # (valor, em promoção) do produto achado
+        self.context_price: tuple[float, bool] | None = None  # de um turno anterior
         self.policy_topics: list[Intent] = [Intent.POLITICA] if route.has(Intent.POLITICA) else []
         if route.has(Intent.RECLAMACAO):
             self.pf.notes.append(COMPLAINT)
@@ -170,13 +232,22 @@ class _Planner:
         await self.orders()
         await self.money()
         if r.has(Intent.HORARIO):
-            await self.call("status_loja", {})
+            res = await self.call("status_loja", {})
+            if r.intents == (Intent.HORARIO,) and res.ok and res.data:
+                # dado puro: "abrem no domingo?" pede o horário semanal, que o Bonsai ignorava
+                self.pf.direct_answer = hours_reply(res.data)
+        if self._payment_answered_policy():
+            self.policy_topics.remove(Intent.POLITICA)
         if self.policy_topics:
             topics = " ".join(POLICY_TOPIC[i] for i in self.policy_topics)
             limit = max(self.budget.policy_sections, min(len(self.policy_topics), 3))
-            await self.call(
+            res = await self.call(
                 "consultar_politica", {"pergunta": f"{topics} {self.text}".strip(), "limite": limit}
             )
+            if self._contact_only() and (reply := contact_reply(res.data or {})):
+                # dado puro, como o horário: o Bonsai trocava telefone e WhatsApp e chegou a
+                # inventar valores numa resposta de endereço
+                self.pf.direct_answer = reply
         if pf.calls:
             pf.notes.insert(0, USE_DATA)
         if r.has(Intent.GERAL):
@@ -184,11 +255,27 @@ class _Planner:
         pf.unresolved |= {i for i in r.intents if _failed(pf, i)}
         return pf
 
+    def _contact_only(self) -> bool:
+        terms = set(policy_terms(self.text))
+        return self.route.intents == (Intent.POLITICA,) and bool(terms) and terms <= CONTACT_WORDS
+
+    def _payment_answered_policy(self) -> bool:
+        """Pergunta de desconto com produto em contexto: a simulação de pagamento já responde.
+
+        O manual junto (pagamento + promoções) fazia o Bonsai despejar as seções e chamar o PIX de
+        "preço promocional". Só vale quando a política veio só de palavras de desconto/promoção.
+        """
+        simulated = any(c.name == "simular_pagamento" and c.result.ok for c in self.pf.calls)
+        terms = set(policy_terms(self.text))
+        return simulated and Intent.POLITICA in self.policy_topics and terms <= DISCOUNT_WORDS
+
     async def products(self) -> None:
         r, text, limit = self.route, self.text, self.budget.product_results
         if r.has(Intent.ACESSORIO):
-            await self.call("buscar_produtos", {"texto": text})
-            self.pf.notes.append(NO_TOOL_ANSWER)
+            res = await self.call("buscar_produtos", {"texto": text})
+            if r.intents == (Intent.ACESSORIO,):
+                item = ((res.data or {}).get("filtros") or {}).get("acessorio")
+                self.pf.direct_answer = accessory_reply(item)
         found = False
         if r.has(Intent.PRODUTO):
             res = await self.call("detalhar_produto", {"produto": product_query(text)})
@@ -196,6 +283,7 @@ class _Planner:
             if data.get("situacao") == "found" and (p := data.get("produto")):
                 found = True
                 self.price = (float(p["preco_final"]), bool(p.get("promocao")))
+                self.pf.product_price = self.price
             elif data.get("situacao") == "not_found" and not r.has(Intent.CATALOGO):
                 await self.call("buscar_produtos", {"texto": text, "limite": limit})
         if r.has(Intent.CATALOGO) and not found:
@@ -224,6 +312,9 @@ class _Planner:
     async def money(self) -> None:
         """Pagamento e frete: com valor (do produto ou citado) calcula; sem valor, a política."""
         r, s, price = self.route, self.route.slots, self.price
+        mentions_product = r.has(Intent.PRODUTO) or r.has(Intent.CATALOGO)
+        if price is None and s.amount is None and not mentions_product:
+            price = self.context_price  # "e dá pra fazer em 10x?" logo depois do GD20
         # numa busca por faixa ("até R$ 1000") o valor citado é filtro, não o valor da compra
         amount = price[0] if price else (None if r.has(Intent.CATALOGO) else s.amount)
         if r.has(Intent.PAGAMENTO):

@@ -134,19 +134,24 @@ class HistoryStore:
             )  # fmt: skip
             c.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
 
-    def messages(self, session_id: str, window: int | None = None) -> list[dict[str, Any]]:
+    def messages(
+        self, session_id: str, window: int | None = None, *, skip_blocked: bool = False
+    ) -> list[dict[str, Any]]:
         """Mensagens no formato do chat (`role`, `content`), das mais antigas às mais recentes.
 
         `window`: só as últimas N, começando sempre por uma mensagem do cliente.
+        `skip_blocked`: sem os pares (pergunta, recusa) bloqueados por guardrail, que não voltam
+        ao contexto do modelo ao retomar uma sessão.
         """
-        rows = (
+        full = (
             self._conn()
             .execute(
-                "SELECT role, content FROM messages WHERE session_id = ? ORDER BY id",
+                "SELECT role, content, meta FROM messages WHERE session_id = ? ORDER BY id",
                 (session_id,),
             )
             .fetchall()
         )
+        rows = [(r, c) for r, c, _ in (_without_blocked(full) if skip_blocked else full)]
         if window is not None:
             rows = rows[-window:] if window > 0 else []
             while rows and rows[0][0] != "user":
@@ -163,3 +168,15 @@ class HistoryStore:
             .fetchall()
         )
         return [json.loads(m) for (m,) in rows]
+
+
+def _without_blocked(rows: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
+    """Remove a pergunta e a resposta de cada turno cuja resposta foi um bloqueio de guardrail."""
+    out: list[tuple[str, str, str]] = []
+    for row in rows:
+        if row[0] == "assistant" and json.loads(row[2] or "{}").get("guardrail"):
+            if out and out[-1][0] == "user":
+                out.pop()
+            continue
+        out.append(row)
+    return out

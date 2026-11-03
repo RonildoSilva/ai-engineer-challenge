@@ -1,5 +1,5 @@
 {
-  "gerado_em": "2026-11-03T13:00:39-03:00",
+  "gerado_em": "2026-11-03T17:04:27-03:00",
   "perfil": "oraculo",
   "modelo": "nenhum (devolve os dados)",
   "cenarios": 18,
@@ -7,10 +7,10 @@
   "taxa_aprovacao": 1.0,
   "falhas_de_assercao": 0,
   "turnos": 20,
-  "turnos_com_llm": 14,
+  "turnos_com_llm": 12,
   "latencia_llm_p50_s": 0.0,
   "latencia_llm_p95_s": 0.1,
-  "prompt_tokens_medio": 924,
+  "prompt_tokens_medio": 934,
   "cenarios_detalhe": [
     {
       "id": "preco_gd20",
@@ -81,7 +81,7 @@
           "answer": "ambiguous Kalani KAL-700T Tenor Natural disponível R$ 323,10 na promoção Oferta Especial (10% de desconto sobre R$ 359,00); o desconto do PIX não se soma à promoção Oferta Especial (10%) Kalani KAL-300S Soprano Natural disponível R$ 179,90 (ou R$ 170,91 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Kalani KAL-500C Concert Elétrico Natural disponível R$ 479,00 (ou R$ 455,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Mais de um produto corresponde; pergunte ao cliente qual deles. ok Ukuleles True Kalani KAL-700T Tenor Natural disponível R$ 323,10 na promoção Oferta Especial (10% de desconto sobre R$ 359,00); o desconto do PIX não se soma à promoção Oferta Especial (10%) Kalani KAL-300S Soprano Natural disponível R$ 179,90 (ou R$ 170,91 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Kalani KAL-500C Concert Elétrico Natural disponível R$ 479,00 (ou R$ 455,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Kala KA-C Concert Mogno disponível R$ 349,90 (ou R$ 332,40 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Kala KA-T Tenor Mogno disponível R$ 449,90 (ou R$ 427,40 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção)",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.09,
+          "latency_s": 0.1,
           "prompt_tokens": 1158,
           "tools": [
             "detalhar_produto*",
@@ -101,7 +101,7 @@
           "answer": "ambiguous Giannini GF-3D Dreadnought Sunburst esgotado (sem estoque no momento) R$ 799,90 (ou R$ 759,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GNF-3 CEQ Elétrico Nylon Natural disponível R$ 1.049,00 (ou R$ 996,55 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GF-1R Aço Folk Sunburst disponível R$ 579,90 (ou R$ 550,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Mais de um produto corresponde; pergunte ao cliente qual deles. ok Violões True Giannini GNF-3 CEQ Elétrico Nylon Natural disponível R$ 1.049,00 (ou R$ 996,55 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GF-1R Aço Folk Sunburst disponível R$ 579,90 (ou R$ 550,90 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GWNE-7 7 Cordas Nylon Natural disponível R$ 1.149,00 (ou R$ 1.091,55 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Giannini GN-15 Nylon Cedr Natural disponível R$ 689,00 (ou R$ 654,55 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção) Takamine GC5CE Elétrico Nylon Natural disponível R$ 3.299,00 (ou R$ 3.134,05 no PIX, 5% de desconto) nenhuma (o desconto do PIX é forma de pagamento, não promoção)",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.08,
+          "latency_s": 0.09,
           "prompt_tokens": 1157,
           "tools": [
             "detalhar_produto*",
@@ -137,11 +137,11 @@
       "turnos": [
         {
           "user": "vocês vendem palheta?",
-          "answer": "accessory palheta A Empório da Música trabalha exclusivamente com instrumentos musicais e não vende acessórios (cordas, palhetas, cabos, cases, pedais, amplificadores). Redirecione com educação e, se possível, sugira procurar uma loja parceira.",
+          "answer": "Aqui na Empório da Música a gente trabalha só com instrumentos musicais, então não vendemos palheta nem outros acessórios (cordas, cabos, cases, pedais, amplificadores). Mas se você estiver procurando um instrumento, posso te ajudar a escolher! 🎸",
           "failures": [],
-          "llm_calls": 1,
+          "llm_calls": 0,
           "latency_s": 0.0,
-          "prompt_tokens": 720,
+          "prompt_tokens": 698,
           "tools": [
             "buscar_produtos*"
           ]
@@ -206,7 +206,7 @@
           "answer": "Certo, pedido 7! Para confirmar que é você, me informa o e-mail ou o telefone usado na compra?",
           "failures": [],
           "llm_calls": 0,
-          "latency_s": 0.12,
+          "latency_s": 0.1,
           "prompt_tokens": 1137,
           "tools": [
             "consultar_politica*"
@@ -214,11 +214,11 @@
         },
         {
           "user": "leticia.rocha@jmail.com",
-          "answer": "True arrependimento False Arrependimento: até 7 dias corridos após o recebimento, sem justificativa (§4.1). 2026-02-24 0 Fora do prazo de arrependimento. Se houver defeito, ainda pode valer a troca por defeito ou a garantia: pergunte se o produto apresenta algum problema. Fora do prazo: terminou em 24/02/2026 (29 dias atrás).",
+          "answer": "True arrependimento False Arrependimento: até 7 dias corridos após o recebimento, sem justificativa (§4.1). 2026-02-24 Se o produto tiver algum defeito, ainda pode valer a troca por defeito (até 30 dias após a compra) ou a garantia: é só contar o que aconteceu. Fora do prazo: a devolução por arrependimento valia até 24/02/2026 (terminou há 29 dias), então não é mais possível por esse motivo.",
           "failures": [],
           "llm_calls": 1,
           "latency_s": 0.01,
-          "prompt_tokens": 807,
+          "prompt_tokens": 819,
           "tools": [
             "verificar_devolucao*"
           ]
@@ -255,7 +255,7 @@
           "answer": "Formas de pagamento e parcelamento ## 3. Formas de Pagamento\n\nFormas aceitas para compras presenciais e online:\n\n| Forma | Condições | Observações |\n|---|---|---|\n| PIX | Pagamento à vista | 5% de desconto sobre o preço de tabela (não vale sobre preço promocional, ver §6.2) |\n| Cartão de Débito | Pagamento à vista | Todas as bandeiras aceitas |\n| Cartão de Crédito | Até 12x sem juros | Parcela mínima conforme a faixa de parcelas (§3.1); a tabela original citava \"Parcela mínima de R$ 100,00\" |\n| Boleto Bancário | Pagamento à vista | Compensação em até 3 dias úteis |\n\n### 3.1 Regras de Parcelamento\n\n- **Até 3x:** sem juros, sem valor mínimo de parcela, exceto parcelas abaixo de R$ 50,00 (não permitidas).\n- **De 4x a 6x:** sem juros, parcela mínima de R$ 80,00.\n- **De 7x a 12x:** sem juros, parcela mínima de R$ 100,00.\n- **Combinação de formas de pagamento** (ex.: PIX + cartão): permitida para compras acima de R$ 2.000,00. Promoções e descontos ## 6. Promoções e Descontos\n\n### 6.1 Tipos de Promoção\n\nA Empório da Música realiza promoções periódicas ao longo do ano. As principais campanhas:\n\n- **Aniversário da Loja (Agosto):** descontos de 10% a 25% em itens selecionados.\n- **Black Friday (Novembro):** descontos de 15% a 30% em todo o catálogo.\n- **Volta às Aulas (Fevereiro):** descontos especiais em instrumentos para estudantes.\n- **Queima de Estoque:** promoções pontuais para renovação de catálogo.\n- **Semana do Músico:** promoções na semana do Dia do Músico (22 de novembro).\n\n### 6.2 Regras de Promoções\n\n- **Cumulatividade:** promoções não são cumulativas. O desconto de PIX (5%) não se aplica sobre preços já\n  promocionais.\n- **Estoque:** promoções estão sujeitas à disponibilidade de estoque. Produtos esgotados durante a promoção\n  não geram direito a rain check (reserva de preço).\n- **Comunicação:** preços promocionais devem sempre ser apresentados junto ao preço original e ao percentual\n  de desconto, para total transparência ao cliente.",
           "failures": [],
           "llm_calls": 1,
-          "latency_s": 0.08,
+          "latency_s": 0.06,
           "prompt_tokens": 1152,
           "tools": [
             "consultar_politica*"
@@ -290,9 +290,9 @@
       "turnos": [
         {
           "user": "qual o endereço de vocês?",
-          "answer": "Sobre a loja, endereço e contatos # Empório da Música — *Sua música começa aqui.*\n\nManual de Políticas e Procedimentos — Atendimento ao Cliente. Versão 2.1 — Junho de 2025.\n\n## 1. Sobre a Empório da Música\n\nA Empório da Música é uma loja especializada em instrumentos musicais, fundada em 2008 em Campo Grande,\nMato Grosso do Sul. Com mais de 15 anos de atuação no mercado, é referência regional na venda de\ninstrumentos para músicos iniciantes, intermediários e profissionais.\n\nO catálogo abrange mais de 300 instrumentos de marcas nacionais e internacionais, incluindo guitarras,\nbaixos, violões, baterias, teclados, instrumentos de sopro, cordas orquestrais e ukuleles.\n**A loja trabalha exclusivamente com instrumentos musicais: não comercializa acessórios** como cordas,\npalhetas, cabos, cases, pedais ou amplificadores.\n\n### 1.1 Missão\n\nDemocratizar o acesso a instrumentos musicais de qualidade na região Centro-Oeste, oferecendo atendimento\nespecializado e preços competitivos, contribuindo para o desenvolvimento cultural e musical da comunidade.\n\n### 1.2 Dados da Empresa\n\n| Campo | Informação |\n|---|---|\n| Razão Social | Empório da Música Instrumentos Musicais Ltda. |\n| Nome Fantasia | Empório da Música |\n| CNPJ | 12.345.678/0001-90 |\n| Endereço | Rua 14 de Maio, 3200 — Centro, Campo Grande - MS, CEP 79202-333 |\n| Telefone | (67) 3341-4444 |\n| WhatsApp (atendimento remoto) | (67) 3321-4500 |\n| E-mail | contato@emporiodamusica.com.br |\n| Fundação | 2008 |",
+          "answer": "Aqui estão os contatos da Empório da Música 🎸 Endereço: Rua 14 de Maio, 3200 — Centro, Campo Grande - MS, CEP 79202-333 · Telefone: (67) 3341-4444 · WhatsApp (atendimento): (67) 3321-4500 · E-mail: contato@emporiodamusica.com.br.",
           "failures": [],
-          "llm_calls": 1,
+          "llm_calls": 0,
           "latency_s": 0.06,
           "prompt_tokens": 1017,
           "tools": [

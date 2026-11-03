@@ -2,8 +2,9 @@
 
 Os binários **não são versionados** (ver `.gitignore`). As fontes oficiais, fixadas por tag ou commit, e os
 checksums SHA-256 ficam em [`manifest.tsv`](manifest.tsv). O script `./scripts/download_model.sh <id>`
-baixa os arquivos e recusa qualquer um cujo checksum não confira. O `./scripts/setup.sh` já baixa todos (há
-um teste garantindo que todo artefato do manifesto está no setup).
+baixa os arquivos e recusa qualquer um cujo checksum não confira. O `./scripts/setup.sh` baixa os três
+obrigatórios; o Qwen3-1.7B, usado só na avaliação, entra com `EVAL_MODELS=1 ./scripts/setup.sh` (há um teste
+garantindo que todo artefato do manifesto está no setup).
 
 ```
 models/
@@ -12,8 +13,10 @@ models/
 │   └── llamafile-0.10.6-thin                 # runtime oficial Mozilla (~44 MB)
 ├── bonsai-1.7b/
 │   └── Bonsai-1.7B.gguf                      # LLM de chat, oficial PrismML (~248 MB, 1-bit Q1_0)
-└── embeddinggemma-300m/
-    └── embeddinggemma-300M-Q8_0.gguf         # embeddings, Google via ggml-org (~334 MB, Q8_0)
+├── embeddinggemma-300m/
+│   └── embeddinggemma-300M-Q8_0.gguf         # embeddings, Google via ggml-org (~334 MB, Q8_0)
+└── qwen3-1.7b/                               # opcional (EVAL_MODELS=1)
+    └── Qwen3-1.7B-Q8_0.gguf                  # LLM de comparação na avaliação, oficial Qwen (~1,8 GB, Q8_0)
 ```
 
 | id | Artefato | Fonte oficial |
@@ -21,6 +24,7 @@ models/
 | `llamafile-0.10.6` | runtime [llamafile](https://github.com/mozilla-ai/llamafile) v0.10.6 *thin* (sem pesos embutidos) | [release 0.10.6](https://github.com/mozilla-ai/llamafile/releases/tag/0.10.6) (digest SHA-256 publicado no GitHub) |
 | `bonsai-1.7b` | [Bonsai-1.7B](https://docs.prismml.com/models/bonsai-1-7b): arquitetura Qwen3, 1.72B params, contexto de treino 32k | [prism-ml/Bonsai-1.7B-gguf](https://huggingface.co/prism-ml/Bonsai-1.7B-gguf) @ `210a9e9` |
 | `embeddinggemma-300m` | EmbeddingGemma 300M (Google): multilíngue, 768 dimensões, contexto de 2048 tokens. Licença *Gemma Terms of Use* | [ggml-org/embeddinggemma-300M-GGUF](https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF) @ `0f741b5` |
+| `qwen3-1.7b` *(opcional)* | Qwen3-1.7B Q8_0: mesma arquitetura do Bonsai, sem a quantização de 1 bit. Usado na avaliação (perfil `qwen3-1.7b`, porta 8082). Licença Apache-2.0 | [Qwen/Qwen3-1.7B-GGUF](https://huggingface.co/Qwen/Qwen3-1.7B-GGUF) @ `90862c4` |
 
 **Por que runtime + GGUF separados (e não um `.llamafile` único)?** Os artefatos vêm direto dos
 publicadores oficiais e têm checksum verificável. O mesmo runtime serve o LLM e os embeddings, e trocar um

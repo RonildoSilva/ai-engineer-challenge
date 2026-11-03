@@ -157,7 +157,28 @@ async def test_blocked_message_never_reaches_the_llm_or_the_tools(server, text, 
     assert turn.answer == REPLIES[block]
     assert turn.llm_calls == 0
     assert turn.prefetched == []
-    assert agent.messages[-1]["content"] == REPLIES[block]
+    # fora do contexto do modelo nos próximos turnos (continua no histórico salvo)
+    assert all(m["content"] != text for m in agent.messages)
+
+
+async def test_blocked_turn_does_not_contaminate_the_next_answer(server):  # noqa: F811
+    """O turno bloqueado não pode voltar ao contexto do modelo.
+
+    Depois de recusar a receita de bolo, o Bonsai respondeu "aqui está a receita" ao pedido
+    seguinte de violão.
+    """
+    llm = ScriptedLLM([answer("Para iniciante, o Yamaha C40.")])
+    await run(
+        server, llm, "qual a receita de bolo de cenoura?", "me indica um violão pra iniciante"
+    )
+    sent = " ".join(str(m.get("content")) for m in llm.seen[0])
+    assert "bolo" not in sent
+
+
+def test_accented_store_email_is_not_redacted():
+    text, removed = redact_contacts("Escreva para contato@empóriodamusica.com.br", [])
+    assert removed == []
+    assert "contato@empóriodamusica.com.br" in text
 
 
 async def test_complaint_alone_is_escalated_with_ready_reply(server):  # noqa: F811

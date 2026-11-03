@@ -93,7 +93,7 @@ class ChatSession:
         if self.store.get_session(self.session_id) is None:
             raise KeyError(f"sessão '{self.session_id}' não existe")
         await self.agent.start()
-        past = self.store.messages(self.session_id, window=self.window)
+        past = self.store.messages(self.session_id, window=self.window, skip_blocked=True)
         self.agent.messages += past
         self.resumed = len(past)
         last_user = next((m["content"] for m in reversed(past) if m["role"] == "user"), None)
