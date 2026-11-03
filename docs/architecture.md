@@ -11,7 +11,7 @@ interface da versão local e passa na mesma suíte de testes.
 flowchart TB
     subgraph canal[Canal]
         CLI[emporio chat / ask]
-        WA[WhatsApp · REST /chat<br/><i>planejado</i>]
+        WA[REST /chat + SSE<br/>WhatsApp · interface web]
     end
     subgraph host[Host do agente · sem estado entre requisições]
         G[guardrails de entrada] --> R[detecção de assunto] --> PF[pré-busca via MCP]
@@ -68,9 +68,10 @@ flowchart TB
 4. **LLM.** É a parte cara e lenta (segundos a minutos por resposta em CPU). Opções, por perfil, sem mudar
    código: GPU dedicada para o modelo local, ou API online. A pré-busca e o orçamento de contexto mantêm o
    prompt curto (~900 tokens), o que reduz custo por mensagem em qualquer opção.
-5. **Canal.** Um endpoint REST `/chat` (estilo webhook do WhatsApp) sobre a mesma `ChatSession` da CLI; o
-   histórico já tem adaptador Postgres (`HISTORY_BACKEND=postgres`, mesma suíte de contrato) e a sessão é identificada pelo telefone do
-   cliente, sem guardar o número em texto (hash).
+5. **Canal.** A API REST (`emporio api`: `POST /chat`, `/chat/stream` com SSE) já roda sobre a mesma
+   `ChatSession` da CLI, e o histórico já tem adaptador Postgres (`HISTORY_BACKEND=postgres`). Falta o adaptador
+   do WhatsApp (webhook do provedor → `POST /chat`), com a sessão identificada pelo telefone do cliente em hash,
+   e autenticação no gateway.
 6. **Observabilidade.** Os logs já saem em JSON, uma linha por evento (`LOG_FORMAT=json`), com assunto, tools,
    tokens, latência e motivo da resposta de segurança. Em produção: coleta centralizada, métricas de taxa de
    resposta de segurança e de encaminhamento à equipe, e a avaliação (`emporio eval`) rodando a cada mudança de

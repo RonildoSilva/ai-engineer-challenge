@@ -345,3 +345,35 @@ async def test_agent_end_to_end_with_real_bonsai(server, built_store):
     assert refund.fallback is None
     assert "7" in refund.answer
     assert "dias" in refund.answer
+
+
+def test_rest_api_end_to_end_with_real_bonsai(server, built_store, tmp_path):
+    """A API REST com o Bonsai real: POST /chat responde o preço do GD20 com o rastro do turno."""
+    from datetime import date
+
+    from starlette.testclient import TestClient
+
+    from emporio.agent.budget import ContextBudget
+    from emporio.agent.history import SqliteHistoryStore
+    from emporio.agent.llm import LLMClient, get_profile
+    from emporio.api.app import ApiConfig, build_app
+    from emporio.config import Settings
+    from emporio.mcp_server.server import build_server
+
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None, data_processed_dir=built_store.parent, embedding_backend="fake"
+    )
+    profile = get_profile(settings, "bonsai")
+    llm = LLMClient(profile.model_copy(update={"base_url": f"{server}/v1"}))
+    budget = ContextBudget(llm.context_window(), profile.max_output_tokens)
+    cfg = ApiConfig(profile="bonsai", model="bonsai", reference_date=date(2026, 3, 25),
+                    budget=budget)  # fmt: skip
+    store = SqliteHistoryStore(tmp_path / "history.db")
+    app = build_app(llm=llm, mcp_target=build_server(settings), store=store, cfg=cfg)
+    with TestClient(app) as client:
+        assert client.get("/health").json()["llm"] == "ok"
+        body = client.post("/chat", json={"mensagem": "Quanto custa o Takamine GD20?"}).json()
+    store.close()
+    assert body["pre_busca"] == ["detalhar_produto"]
+    assert body["resposta_de_seguranca"] is None
+    assert "2199" in body["resposta"].replace(".", "").replace(" ", "")

@@ -22,6 +22,7 @@ from __future__ import annotations
 import difflib
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Protocol
@@ -127,6 +128,8 @@ class Agent:
         self.llm = llm
         self.toolbox = toolbox
         self.reference_date = reference_date
+        # progresso do turno para quem está esperando (a API manda via SSE): (evento, dados)
+        self.on_event: Callable[[str, dict[str, Any]], None] | None = None
         self.max_rounds = max_rounds
         self.budget = budget or ContextBudget(window=8192, reserve_output=512)
         self.routing = routing  # False: sem pré-busca, todas as tools (comportamento do commit 11)
@@ -163,6 +166,7 @@ class Agent:
                 extra={"block": verdict.block.value, "matched": verdict.matched},
             )
             turn.guardrail = verdict.block.value
+            self._emit("bloqueio", {"motivo": verdict.block.value})
             turn.answer = verdict.reply
         try:
             if not turn.guardrail:  # bloqueada: resposta pronta, sem rotear nem chamar o LLM
@@ -214,6 +218,8 @@ class Agent:
         else:
             turn.route = route(user_message, self.last_route, past)
             self.last_route = turn.route
+            self._emit("assunto", {"intencoes": [i.value for i in turn.route.intents],
+                                   "herdado": turn.route.inherited})  # fmt: skip
             if turn.route.has(Intent.RECLAMACAO):
                 turn.escalated = True
                 log.warning("atendimento encaminhado à equipe", extra={"motivo": "reclamação"})
@@ -221,6 +227,8 @@ class Agent:
                 turn.route, user_message, self.toolbox, self.budget, self.last_price
             )
             self.last_price = pf.product_price or self.last_price
+            self._emit("dados", {"tools": [c.name for c in pf.calls],
+                                 "resposta_pronta": pf.direct_answer is not None})  # fmt: skip
             direct = pf.direct_answer
             turn.prefetched = [
                 ToolTrace(c.name, _masked(c.arguments), c.result.ok, c.content, 0.0)
@@ -248,6 +256,14 @@ class Agent:
             )
         return fitted, evidence, direct
 
+    def _emit(self, event: str, data: dict[str, Any]) -> None:
+        if self.on_event is None:
+            return
+        try:
+            self.on_event(event, data)
+        except Exception:  # quem escuta não pode derrubar o atendimento
+            log.exception("falha ao emitir evento do turno", extra={"event": event})
+
     @staticmethod
     def _turn_system(system: dict[str, Any], pf: Prefetch) -> dict[str, Any]:
         if not pf.notes:
@@ -271,6 +287,8 @@ class Agent:
         working = list(fitted.messages)
         tools = fitted.tools
         for _ in range(self.max_rounds):
+            self._emit("redigindo", {"chamada": turn.llm_calls + 1,
+                                     "prompt_tokens": turn.prompt_tokens})  # fmt: skip
             result: ChatResult = await anyio.to_thread.run_sync(
                 lambda msgs=working: self.llm.chat(msgs, tools=tools)
             )
@@ -279,6 +297,7 @@ class Agent:
                 working.append(self._assistant_tool_message(result))
                 # sequencial (não paralelo): a ordem das chamadas é preservada no rastro
                 for call in result.tool_calls:
+                    self._emit("tool", {"nome": call.name})
                     msg = await self._run_tool(call, turn)
                     evidence.append(msg["content"])
                     working.append(msg)
@@ -295,6 +314,7 @@ class Agent:
             if problem and not turn.retried:
                 log.info("resposta com problema: pedindo correção", extra={"problem": problem})
                 turn.retried = problem
+                self._emit("correcao", {"motivo": problem})
                 working += [
                     {"role": "assistant", "content": answer},
                     {"role": "user", "content": correction},

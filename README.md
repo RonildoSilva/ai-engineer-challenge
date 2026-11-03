@@ -24,6 +24,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 - [Pedidos e regras da loja](#pedidos-e-regras-da-loja)
 - [Servidor MCP (a API)](#servidor-mcp-a-api)
 - [Agente](#agente)
+- [API REST](#api-rest)
 - [Avaliação](#avaliação)
 - [Conversas de exemplo](#conversas-de-exemplo)
 - [Camada de dados](#camada-de-dados)
@@ -248,6 +249,7 @@ uv run emporio mcp --http --port 8000              # servidor MCP via Streamable
 uv run emporio llm list                            # perfis de LLM (testados × referência)
 uv run emporio llm check [--profile bonsai]        # conexão, contexto, chat e tool calling
 uv run emporio ask "Quanto custa o Takamine GD20?" --debug   # uma pergunta ao agente, sem histórico
+uv run emporio api                                 # API REST do atendimento em http://127.0.0.1:8010
 ```
 
 Avaliação (ver [Avaliação](#avaliação)):
@@ -275,7 +277,7 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>594 testes, ~35 s, offline<br/>+51 com Postgres, job próprio]
+        L2 --> L3[pytest unitário<br/>611 testes, ~35 s, offline<br/>+51 com Postgres, job próprio]
         L3 --> L4[pytest -m integration<br/>9 testes, ~5 min,<br/>sobe os modelos reais]
     end
     K -.-> K2
@@ -298,6 +300,7 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Relatório de dados | cada número de `docs/data_report.md` continua verdadeiro sobre `data/raw` (11) | `tests/test_data_findings.py` |
 | Orquestrador | ordem topológica, ciclo/dependência inexistente rejeitados, execução incremental por conteúdo, invalidação por entrada/código/versão, saída adulterada detectada, falha isola dependentes, linhagem (19) | `tests/test_pipeline_core.py` |
 | Id de requisição | `request_id` só dentro do contexto, contexto aninhado restaura o anterior, um id por turno em todos os logs, chamadas de tool no MCP rastreáveis (3) | `tests/test_request_id.py` |
+| API REST | `/chat` com resposta e rastro, **sessão continua entre requisições** (o assunto do pedido segue), histórico com PII mascarada, guardrail sem LLM, entrada inválida (400/413/404), corpo não JSON, **`/chat/stream` com os eventos na ordem** (sessao → assunto → dados → redigindo → resposta) e stream de mensagem bloqueada, JSON legível em UTF-8, `/health`, **CORS só para a origem do front** (17) | `tests/test_api.py` |
 | DAG do Airflow | arquivo real do DAG importado com stub do Airflow: **uma task por etapa e as mesmas dependências**, cada task roda a própria etapa, grafo topológico; `run_task` exige dependências em dia, roda incremental (refaz e depois pula) e falha para o orquestrador quando a etapa falha (6) | `tests/test_airflow_dag.py` |
 | Config, logs e CLI | defaults, sobrescrita por ambiente, **config inválida falha cedo**, logs texto/JSON, `emporio pipeline` e códigos de saída (12) | `tests/test_config_cli.py` |
 | Camada de dados | regras de tratamento, 7 tipos de linha inválida reportados com `arquivo:linha campo`, integridade referencial, **7 violações barradas pelos `CHECK`s do banco**, banco anterior intacto quando a validação falha, mudança de regra refaz o `transform` (41) | `tests/test_data_layer.py` |
@@ -720,6 +723,60 @@ O que sobra de latência é o processamento do prompt em CPU (~17–20 tokens/s 
 usar só os núcleos físicos: 4 threads processam o prompt 35% mais rápido que as 8 do modo automático
 (19,8 × 14,6 tokens/s).
 
+## API REST
+
+`emporio api` expõe o mesmo agente como serviço HTTP (`src/emporio/api/app.py`, Starlette, que já vem com o SDK
+do MCP, sem dependência nova). É o **contrato único dos canais**: um webhook de WhatsApp e a interface web
+conversam com a Mel por aqui, com a mesma `ChatSession` da CLI (histórico, guardrails, pré-busca).
+
+| Rota | O que faz |
+|---|---|
+| `GET /health` | servidor, perfil, modelo e se o LLM está no ar |
+| `POST /chat` | `{"mensagem": "...", "sessao": "opcional"}` → resposta e rastro do turno (assunto, pré-busca, tools, chamadas ao LLM, tokens, latência, bloqueio, encaminhamento, `request_id`) |
+| `POST /chat/stream` | o mesmo turno em **Server-Sent Events**: `sessao`, `assunto`, `dados`, `redigindo`, `tool`, `correcao`, `bloqueio` e, no fim, `resposta` (o corpo do `/chat`) ou `erro` |
+| `GET /sessions/{id}` | histórico da sessão, com e-mail e telefone mascarados, e os metadados de cada turno |
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant F as Front / WhatsApp
+    participant A as API (emporio api)
+    participant G as Agente
+    participant M as MCP
+    participant L as LLM
+    F->>A: POST /chat/stream {"mensagem": "Quanto custa o Takamine GD20?"}
+    A-->>F: event: sessao
+    A->>G: ChatSession.send
+    G-->>F: event: assunto (produto)
+    G->>M: pré-busca detalhar_produto
+    G-->>F: event: dados (detalhar_produto)
+    G-->>F: event: redigindo (758 tokens)
+    G->>L: 1 chamada
+    L-->>G: resposta
+    A-->>F: event: resposta (texto + rastro)
+```
+
+```bash
+curl -s -X POST localhost:8010/chat -H 'Content-Type: application/json' \
+     -d '{"mensagem": "vocês abrem no domingo?"}'
+curl -sN -X POST localhost:8010/chat/stream -H 'Content-Type: application/json' \
+     -d '{"mensagem": "Quanto custa o Takamine GD20?"}'
+```
+
+- **Streaming em POST, não GET:** o `EventSource` do navegador só faz GET, e a mensagem iria na URL, junto com
+  um e-mail ou telefone do cliente, que acabariam em logs de acesso e de proxies. O front lê o stream com `fetch`.
+- **Com o Bonsai em CPU**, os eventos `sessao`, `assunto`, `dados` e `redigindo` chegam na hora, e a `resposta`
+  em ~1–2 min. É o que deixa a interface usável. Respostas prontas (horário, contato, pedido sem dados,
+  guardrails) chegam na hora.
+- **Sem estado entre requisições** além de um cache de sessões: o histórico fica no `HistoryStore` (SQLite ou
+  Postgres), então qualquer réplica retoma a sessão. Duas mensagens da mesma sessão ao mesmo tempo são atendidas
+  uma de cada vez.
+- **CORS** só para a origem da interface (`API_CORS_ORIGINS`, padrão `http://127.0.0.1:8020`); entrada validada
+  (400 sem mensagem, 413 acima de 4.000 caracteres, 404 para sessão inexistente). Se o cliente desconectar no meio
+  do stream, o turno termina e fica no histórico.
+- **No compose**, o serviço `api` sobe em `127.0.0.1:8010`. **Sem autenticação**, como o MCP via HTTP: em produção,
+  ficaria atrás de um gateway (e o id de sessão viria do telefone do WhatsApp, com hash).
+
 ## Avaliação
 
 `src/emporio/evals/` mede três coisas, com gabaritos versionados em `evals/` e resultados em
@@ -1066,7 +1123,7 @@ flowchart TD
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR
-        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::done --> C17["17 · exemplos"]:::done --> C17b["17b · pendências<br/>da revisão"]:::done --> C19["19 · DAG<br/>Airflow"]:::done --> C20["20 · API REST<br/>/chat + SSE"]:::next --> C21["21 · front<br/>web"] --> C18["README final"]
+        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::done --> C17["17 · exemplos"]:::done --> C17b["17b · pendências<br/>da revisão"]:::done --> C19["19 · DAG<br/>Airflow"]:::done --> C20["20 · API REST<br/>/chat + SSE"]:::done --> C21["21 · front<br/>web"]:::next --> C18["README final"]
     end
     F1 --> F2 --> F3 --> F4 --> F5
     classDef next fill:#fde68a,stroke:#b45309,color:#000
@@ -1100,7 +1157,9 @@ src/emporio/     config.py (configuração validada), log.py (logs estruturados)
                  domain/ (modelos, busca de políticas, catálogo, pedidos, pagamento/frete, horário),
                  mcp_server/ (servidor MCP, saídas estruturadas, persona),
                  agent/ (cliente LLM com perfis, cliente MCP, detecção de assunto, pré-busca,
-                         orçamento de contexto, agente com loop de tools)
+                         orçamento de contexto, agente com loop de tools),
+                 api/ (API REST: /chat, /chat/stream, /sessions, /health),
+                 evals/ (cenários, oráculo, classificador, busca, relatório)
 tests/contract/  suítes de contrato reutilizáveis por adaptador
 tests/           testes automatizados (unitários + integração com o LLM local)
 .github/         CI (GitHub Actions)

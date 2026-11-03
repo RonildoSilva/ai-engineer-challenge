@@ -20,6 +20,7 @@ emporio llm check [--profile bonsai]                       conexão, contexto, c
 emporio ask "Quanto custa o Takamine GD20?" [--debug]      uma pergunta ao agente, de ponta a ponta
 emporio chat [--session ID] [--debug] [--transcript f.md]  conversa no terminal, com histórico
 emporio chat --list                                        sessões salvas
+emporio api [--port 8010] [--profile bonsai]               API REST: /chat, /chat/stream, /health
 emporio db load [--database-url postgresql://…]           perfil de escala: carrega o Postgres
 emporio eval intents | retrieval                           classificador e busca (evals/)
 emporio eval scenarios [--profile bonsai --profile qwen3-1.7b]   cenários (padrão: oráculo)
@@ -154,10 +155,19 @@ def _add_service_commands(sub: argparse._SubParsersAction) -> None:
     check = llm.add_parser("check", help="testa um perfil (sobe o servidor local se preciso)")
     check.add_argument("--profile", help="nome do perfil (padrão: LLM_PROFILE ou o default)")
 
+    _add_agent_commands(sub)
+
+
+def _add_agent_commands(sub: argparse._SubParsersAction) -> None:
+    """Comandos do agente: ask, chat, api, eval e o perfil de escala (db)."""
     ask = sub.add_parser("ask", help="uma pergunta ao agente (sobe os servidores necessários)")
     ask.add_argument("question")
     ask.add_argument("--profile", help="perfil de LLM (padrão: LLM_PROFILE ou o default)")
     ask.add_argument("--debug", action="store_true", help="mostra as tools chamadas")
+    api = sub.add_parser("api", help="API REST do atendimento (/chat, /chat/stream)")
+    api.add_argument("--profile", help="perfil de LLM (padrão: LLM_PROFILE ou o default)")
+    api.add_argument("--host", default="127.0.0.1")
+    api.add_argument("--port", type=int, default=8010)
     db = sub.add_parser("db", help="perfil de escala: Postgres + pgvector")
     db_sub = db.add_subparsers(dest="action", required=True)
     load = db_sub.add_parser("load", help="carrega store.db e vectors.db no Postgres")
@@ -561,6 +571,47 @@ def _chat_cmd(args: argparse.Namespace, settings: Settings) -> int:
         store.close()
 
 
+def _api_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    import uvicorn  # noqa: PLC0415 — só a API precisa do servidor ASGI
+
+    from emporio.api.app import ApiConfig, build_app  # noqa: PLC0415
+
+    profile = get_profile(settings, args.profile)
+
+    def run(embedding_url: str | None) -> int:
+        with contextlib.ExitStack() as stack:
+            llm_url = profile.base_url
+            if profile.local and not LLMClient(profile).ping():
+                llm_url = stack.enter_context(
+                    ensure_server(profile.local.mode, profile.base_url,
+                                  settings.path(profile.local.model_file),
+                                  log_dir=settings.processed_dir / "logs", alias=profile.model)
+                )  # fmt: skip
+            llm = LLMClient(profile.model_copy(update={"base_url": llm_url}))
+            store = build_history_store(settings)
+            stack.callback(store.close)
+            cfg = ApiConfig(
+                profile=profile.name,
+                model=llm.profile.resolved_model(),
+                reference_date=settings.reference_date,
+                budget=ContextBudget(llm.context_window(), profile.max_output_tokens),
+                history_window=settings.history_window,
+                cors_origins=tuple(settings.api_cors_origins),
+            )
+            app = build_app(llm=llm, mcp_target=build_server(settings, embedding_url=embedding_url),
+                            store=store, cfg=cfg)  # fmt: skip
+            print(f"API do atendimento em http://{args.host}:{args.port} ({profile.name})",
+                  file=sys.stderr)  # fmt: skip
+            uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+        return 0
+
+    try:
+        return _with_embeddings(settings, run)
+    except ServerUnavailableError as e:
+        print(f"✘ {e}", file=sys.stderr)
+        return 1
+
+
 def _db_cmd(args: argparse.Namespace, settings: Settings) -> int:
     from emporio.adapters.postgres_repo import load_from_pipeline  # noqa: PLC0415 (extra)
 
@@ -697,6 +748,7 @@ def main(argv: list[str] | None = None) -> int:
         "chat": _chat_cmd,
         "eval": _eval_cmd,
         "db": _db_cmd,
+        "api": _api_cmd,
     }
     try:
         return commands[args.command](args, settings)

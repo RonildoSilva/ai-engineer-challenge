@@ -85,6 +85,10 @@ class Settings(BaseSettings):
             )
         return self
 
+    # --- API REST (`emporio api`) ------------------------------------------------------------
+    # origens que o navegador pode usar para chamar a API (a interface web roda na 8020)
+    api_cors_origins: list[str] = ["http://127.0.0.1:8020", "http://localhost:8020"]
+
     # --- histórico de conversas --------------------------------------------------------
     # mensagens retomadas ao continuar uma sessão (o orçamento de contexto ainda corta o excesso)
     history_window: int = Field(default=20, ge=0)
