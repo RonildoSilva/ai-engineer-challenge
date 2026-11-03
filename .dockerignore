@@ -1,0 +1,14 @@
+# Lista de permissão: só entra na imagem o que está liberado abaixo. Ficam fora o ambiente local
+# (.venv, .env), modelos (montados como volume), saídas do pipeline e anotações privadas (_raw/).
+*
+!pyproject.toml
+!uv.lock
+!.python-version
+!README.md
+!src/
+!config/
+!scripts/
+!data/raw/
+!data/curated/
+!models/manifest.tsv
+**/__pycache__

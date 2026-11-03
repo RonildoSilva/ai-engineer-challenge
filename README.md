@@ -272,7 +272,7 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>551 testes, ~35 s, offline]
+        L2 --> L3[pytest unitário<br/>557 testes, ~35 s, offline<br/>+44 com Postgres, job próprio]
         L3 --> L4[pytest -m integration<br/>9 testes, ~5 min,<br/>sobe os modelos reais]
     end
     K -.-> K2
@@ -308,6 +308,8 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Agente | persona e contexto (data de referência, loja aberta) no system prompt, tools do MCP no formato do LLM, loop tool → resultado → resposta, histórico só com perguntas e respostas, argumento inválido / tool inexistente / erro da tool devolvidos ao modelo, **nome de tool quase certo corrigido**, **resposta de segurança** (limite de rodadas, LLM fora do ar, resposta vazia), PII mascarada no rastro, agente via stdio; **pré-busca**: "posso devolver?" em 1 chamada sem tools com a regra dos 7 dias, preço pronto e "sem promoção" explícito, preço do produto alimentando a simulação de 10x, pedido sem dados → pede os dados → pré-busca no turno seguinte, acessório, assunto desconhecido, janela grande; **preço sem fonte**: uma correção e depois resposta de segurança; pedido sem dados respondido sem LLM, pedindo só o que falta (28) | `tests/test_agent.py` |
 | Chat e histórico | e-mail/telefone mascarados ao gravar (pedido e preço preservados), sessão de ida e volta com metadados do turno, janela sempre começando pelo cliente, ordem das sessões e exclusão em cascata, uma conexão por thread, **sessão retomada devolve o histórico e o assunto** ("é o 8, telefone…" continua o pedido), sessão inexistente, `/nova` limpa, transcrição markdown com tools e sem PII, CLI `emporio chat` (conversa, retomada, `--list`, `/nova`, erro) (13) | `tests/test_chat.py` |
 | Avaliação | cenários, intenções e gabarito de busca válidos (rótulos existentes, ids únicos, exemplos do enunciado presentes), **frases da avaliação diferentes das dos testes**, semântica das asserções (sem acento, pontuação preservada, resposta de segurança reprova), **os 18 cenários passam com o oráculo** (o dado certo chega ao modelo), métricas do classificador (precisão/revocação por rótulo) e **piso de 90%**, métricas de busca, resumo regenerado de todos os JSON, CLI `emporio eval` (12) | `tests/test_evals.py` |
+| Postgres + pgvector | **as mesmas suítes de contrato** do `Repository` (22) e do `Retriever` (híbrido sobre pgvector), documentos idênticos aos do SQLite, **ranking do pgvector igual ao do índice SQLite**, filtro por tipo no SQL, conexão somente leitura, injeção de SQL inerte, `CHECK`s equivalentes, carga idempotente, servidor MCP inteiro rodando sobre os dois backends por configuração (44; job `postgres` do CI, contra um Postgres real) | `tests/test_postgres.py` |
+| Deploy | imagens fixadas por digest, uv do Dockerfile igual ao do setup, `.dockerignore` como lista de permissão sem `_raw`/`.env`/modelos, perfis do compose, mesma imagem Postgres no CI e no compose (6); job `docker` do CI constrói a imagem e responde dentro do container | `tests/test_deploy.py` |
 | Busca | documentos (descrição suja não entra), índice vetorial, **suíte de contrato do `Retriever`** (lexical e híbrido), fusão RRF, limiar de similaridade, **degradação para lexical** (serviço fora do ar, índice vazio, modelo trocado) e recuperação, cache de vetores, etapa sem modelo, CLI (44) | `tests/test_retrieval.py`, `tests/contract/` |
 | Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo"); **encerrar o `emporio mcp` (SIGTERM ou SIGHUP) encerra o servidor de embeddings**; **`LLMClient` com o Bonsai real** (contexto 8192 lido de `/props` e tool call); **agente de ponta a ponta** (mesma conversa): "Quanto custa o Takamine GD20?" → pré-busca `detalhar_produto` → 1 chamada → R$ 2.199 sem "promocional"; "posso devolver?" → pré-busca da política → regra dos 7 dias (9) | `tests/test_llm_integration.py` |
 
@@ -800,12 +802,69 @@ interfaces.
 | Orquestração | DAG próprio, incremental, com linhagem | Airflow/Dagster (mesmas funções de etapa) | ✅ DAG · template Airflow *(planejado)* |
 | Configuração | `.env` validado na inicialização (falha cedo) | variáveis de ambiente / secret manager | ✅ |
 | Logs | texto no terminal | JSON, uma linha por evento (`LOG_FORMAT=json`) | ✅ |
-| Dados | SQLite somente leitura atrás de `Repository` | Postgres (mesma suíte de contrato) | ✅ SQLite · Postgres *(planejado)* |
-| Busca | híbrida (lexical + vetores em SQLite, fusão RRF) atrás de `Retriever`; degrada para lexical | pgvector (mesma suíte de contrato) | ✅ híbrida · pgvector *(planejado)* |
+| Dados | SQLite somente leitura atrás de `Repository` | Postgres (`STORE_BACKEND=postgres`), mesma suíte de contrato, no CI | ✅ |
+| Busca | híbrida (lexical + vetores em SQLite, fusão RRF) atrás de `Retriever`; degrada para lexical | pgvector com índice HNSW (`VECTOR_BACKEND=pgvector`), mesma suíte de contrato, no CI | ✅ |
 | Embeddings | embeddinggemma-300m no runtime llamafile, em CPU, atrás de `Embedder` | API de embeddings ou GPU | ✅ |
 | API | servidor MCP via stdio ou Streamable HTTP (local, sem autenticação) | MCP HTTP atrás de API gateway com OAuth, réplicas | ✅ MCP · auth *(planejado)* |
-| Serviços locais | sobem sob demanda e encerram ao final (também com SIGTERM/SIGHUP); porta ocupada → porta livre; log em arquivo | serviços dedicados (systemd/containers) | ✅ |
+| Serviços locais | sobem sob demanda e encerram ao final (também com SIGTERM/SIGHUP); porta ocupada → porta livre; log em arquivo | containers: `deploy/docker-compose.yml` (LLM, embeddings, pipeline, MCP; perfil `scale` com Postgres) | ✅ |
 | LLM | perfil `bonsai` (local, CPU) | outros perfis: modelos maiores, GPU ou API | ✅ perfis · online *(referência)* |
+
+### Escala: containers e Postgres + pgvector
+
+```mermaid
+flowchart LR
+    subgraph default[compose padrão]
+        LLM[llm<br/>llamafile · Bonsai] 
+        EMB[embeddings<br/>llamafile · embeddinggemma]
+        PIPE[pipeline<br/>one-shot, incremental] --> VOL[(volume<br/>data/processed)]
+        EMB --> PIPE
+        VOL --> MCP[mcp :8000<br/>SQLite]
+        EMB --> MCP
+        CHAT[chat<br/>docker compose run] --> LLM
+    end
+    subgraph scale[--profile scale]
+        PG[(postgres<br/>pgvector · HNSW)]
+        LOAD[db-load<br/>one-shot] --> PG
+        VOL --> LOAD
+        PG --> MCPS[mcp-scale :8001<br/>sem estado → réplicas]
+        EMB --> MCPS
+    end
+```
+
+```bash
+./scripts/setup.sh                                                  # modelos em ./models (montados nos containers)
+docker compose -f deploy/docker-compose.yml up -d                   # padrão: LLM, embeddings, pipeline, MCP :8000
+docker compose -f deploy/docker-compose.yml run --rm chat           # conversa no terminal, dentro da rede do compose
+docker compose -f deploy/docker-compose.yml --profile scale up -d   # + Postgres/pgvector e MCP :8001 lendo do banco
+uv run python scripts/load_test.py --url http://127.0.0.1:8001/mcp  # carga no MCP via HTTP
+```
+
+- **Imagem** (`deploy/Dockerfile`): base Debian fixada por digest, uv na mesma versão do setup, CPython
+  gerenciado e dependências exatas do `uv.lock`, usuário sem privilégios. O `.dockerignore` é uma lista de
+  permissão: `.env`, `.venv` e anotações privadas nunca entram. Os **modelos não entram na imagem** (787 MB
+  sem eles): são montados de `./models`, já verificados por SHA-256 pelo setup.
+- **Postgres + pgvector** (`pip`: extra `scale`): `PostgresRepository` e `PgVectorIndex` implementam as mesmas
+  interfaces e passam nas **mesmas suítes de contrato** do SQLite (`tests/test_postgres.py`, job `postgres` do CI
+  com a mesma imagem do compose). O esquema espelha os `CHECK`s do SQLite com tipos nativos (`DATE`, `BOOLEAN`,
+  `vector`); `emporio db load` copia o resultado do pipeline numa transação única. O ranking do pgvector é
+  idêntico ao do índice SQLite (mesmos documentos, mesmas similaridades até a 4ª casa).
+- **O servidor MCP não tem estado** (cada chamada lê do repositório): com o Postgres, várias réplicas atrás de
+  um balanceador servem o mesmo banco. O caminho de produção está em [`docs/architecture.md`](docs/architecture.md).
+
+**Teste de carga** (`scripts/load_test.py`: 20 sessões MCP simultâneas × 25 chamadas = 500, mistura de catálogo,
+pedido, política, pagamento, frete e horário; mesmo notebook, com o LLM ocioso):
+
+| Backend | Erros | Vazão | p50 | p95 | Sem as buscas semânticas: vazão · p95 |
+|---|---|---|---|---|---|
+| SQLite (`mcp` :8000) | 0/500 | 48–68 chamadas/s | 34–124 ms | 1,1–1,8 s | **233 chamadas/s · 227 ms** |
+| Postgres + pgvector (`mcp-scale` :8001) | 0/500 | 43–57 chamadas/s | 53–112 ms | 1,4–1,7 s | **267 chamadas/s · 185 ms** |
+
+<sub>Faixas de duas rodadas (o notebook tinha outras cargas). Resultados em `docs/load_test/`.</sub>
+
+O banco não é o gargalo: sem as duas tools que embedam a pergunta (`buscar_produtos`, `consultar_politica`), a
+vazão sobe ~4× e o Postgres fica igual ou melhor que o SQLite. O limite é o **servidor de embeddings, um processo
+em CPU** atendendo todas as buscas. Em produção: réplicas dele (ou GPU), cache de embeddings de perguntas
+frequentes, e o LLM escalado à parte (é ele que leva segundos por resposta).
 
 ## Modelos locais
 
@@ -955,7 +1014,7 @@ flowchart TD
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR
-        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::next --> C17["17 · exemplos"] --> CX["19–21 · Airflow,<br/>REST, UI"] --> C18["README final"]
+        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::done --> C17["17 · exemplos"]:::next --> CX["19–21 · Airflow,<br/>REST, UI"] --> C18["README final"]
     end
     F1 --> F2 --> F3 --> F4 --> F5
     classDef next fill:#fde68a,stroke:#b45309,color:#000
@@ -972,9 +1031,11 @@ config/          perfis de LLM (llm_profiles.yaml)
 data/raw/        CSVs e manual de políticas originais
 data/curated/    curadoria do manual (uma seção .md por tema + _source.yaml) — versionada
 data/processed/  artefatos gerados (SQLite, policies.json, extração do PDF) — não versionado
-docs/            relatório de dados (data_report.md), avaliação de embeddings (embeddings_eval.md/.json);
+docs/            relatório de dados (data_report.md), avaliação de embeddings (embeddings_eval.md/.json),
+                 arquitetura e caminho de produção (architecture.md), teste de carga (load_test/);
                  workflow com IA (planejado)
 evals/           cenários, gabaritos e resultados (evals/resultados/README.md)
+deploy/          Dockerfile e docker-compose (padrão e perfil scale com Postgres + pgvector)
 examples/        conversas de exemplo                             (planejado)
 models/          manifest.tsv (versionado) + binários (não versionados)
 scripts/         setup, verificação (check.sh), download de modelos, start do llamafile, smoke test,

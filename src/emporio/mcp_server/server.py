@@ -21,7 +21,6 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 from mcp.types import ToolAnnotations
 
-from emporio.adapters.sqlite_repo import SqliteRepository
 from emporio.config import Settings
 from emporio.domain.calculators import check_installments, payment_plan, shipping_quote
 from emporio.domain.catalog import CatalogService, ProductView, detect_category
@@ -31,7 +30,7 @@ from emporio.domain.store_hours import SPECIAL_HOURS_NOTE, store_status, weekly_
 from emporio.log import get_logger
 from emporio.mcp_server import schemas as out
 from emporio.mcp_server.persona import persona_prompt
-from emporio.retrieval.factory import build_retriever
+from emporio.retrieval.factory import build_repository, build_retriever
 
 log = get_logger(__name__)
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True)
@@ -98,8 +97,8 @@ def build_server(
     now: Callable[[], datetime] | None = None,
 ) -> MCPServer:
     """Monta o servidor com os serviços de domínio. `now` permite fixar o relógio em testes."""
-    repo = SqliteRepository(settings.store_db)
-    retriever = build_retriever(settings, embedding_url)
+    repo = build_repository(settings)
+    retriever = build_retriever(settings, embedding_url, repo)
     catalog = CatalogService(repo, retriever)
     orders = OrderService(repo, settings.reference_date)
     policies = PolicyStore.from_json(settings.policies_json)

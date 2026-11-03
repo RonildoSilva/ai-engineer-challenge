@@ -1,0 +1,134 @@
+# Topologia em containers. Pré-requisito: ./scripts/setup.sh (baixa e verifica os modelos em
+# ./models, montados como volume somente leitura).
+#
+# Padrão (a mesma stack local, separada em serviços):
+#   docker compose -f deploy/docker-compose.yml up -d          # LLM, embeddings, pipeline, MCP
+#   docker compose -f deploy/docker-compose.yml run --rm chat  # conversa no terminal
+#
+# Escala (Postgres + pgvector, MCP lendo do banco):
+#   docker compose -f deploy/docker-compose.yml --profile scale up -d
+#   uv run python scripts/load_test.py --url http://127.0.0.1:8001/mcp
+#
+# Imagens de terceiros fixadas por digest; a do projeto é construída de deploy/Dockerfile.
+
+name: emporio
+
+x-app: &app
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  image: emporio:local
+  volumes:
+    - ../models:/app/models:ro
+    - processed:/app/data/processed
+  environment: &app-env
+    LOG_FORMAT: json
+    EMBEDDING_BASE_URL: http://embeddings:8081/v1
+    LLM_BASE_URL: http://llm:8080/v1
+
+x-llamafile-health: &llamafile-health
+  test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+  interval: 5s
+  timeout: 3s
+  retries: 60
+
+services:
+  # ------------------------------------------------------------------ modelos (llamafile)
+  llm:
+    <<: *app
+    command: ["bash", "scripts/start_llamafile.sh"]
+    volumes: ["../models:/app/models:ro"]  # sem o volume de dados: só o pipeline o popula
+    environment:
+      MODE: chat
+      HOST: 0.0.0.0
+      PORT: "8080"
+    healthcheck: *llamafile-health
+
+  embeddings:
+    <<: *app
+    command: ["bash", "scripts/start_llamafile.sh"]
+    volumes: ["../models:/app/models:ro"]  # sem o volume de dados: só o pipeline o popula
+    environment:
+      MODE: embedding
+      HOST: 0.0.0.0
+      PORT: "8081"
+    healthcheck:
+      <<: *llamafile-health
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/health"]
+
+  # ------------------------------------------------------------------ dados
+  # Pipeline incremental: na primeira subida calcula os vetores com o servidor de embeddings;
+  # depois, só refaz o que mudou.
+  pipeline:
+    <<: *app
+    command: ["emporio", "pipeline", "run"]
+    depends_on:
+      embeddings: {condition: service_healthy}
+
+  # ------------------------------------------------------------------ API (MCP) e chat
+  mcp:
+    <<: *app
+    command: ["emporio", "mcp", "--http", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      pipeline: {condition: service_completed_successfully}
+      embeddings: {condition: service_healthy}
+
+  chat:
+    <<: *app
+    profiles: [cli]
+    command: ["emporio", "chat"]
+    stdin_open: true
+    tty: true
+    volumes:
+      - ../models:/app/models:ro
+      - processed:/app/data/processed
+    depends_on:
+      llm: {condition: service_healthy}
+      pipeline: {condition: service_completed_successfully}
+
+  # ------------------------------------------------------------------ perfil de escala
+  postgres:
+    profiles: [scale]
+    image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
+    environment:
+      POSTGRES_USER: emporio
+      POSTGRES_PASSWORD: emporio  # só para a demonstração local; em produção, um secret
+      POSTGRES_DB: emporio
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    # sem porta no host: só a rede do compose acessa (psql: docker compose exec postgres psql -U emporio)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U emporio -d emporio"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  db-load:
+    <<: *app
+    profiles: [scale]
+    command: ["emporio", "db", "load"]
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql://emporio:emporio@postgres:5432/emporio
+    depends_on:
+      postgres: {condition: service_healthy}
+      pipeline: {condition: service_completed_successfully}
+
+  # MCP sem estado lendo do Postgres/pgvector: pode ter várias réplicas atrás de um balanceador
+  mcp-scale:
+    <<: *app
+    profiles: [scale]
+    command: ["emporio", "mcp", "--http", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["127.0.0.1:8001:8000"]
+    environment:
+      <<: *app-env
+      STORE_BACKEND: postgres
+      VECTOR_BACKEND: pgvector
+      DATABASE_URL: postgresql://emporio:emporio@postgres:5432/emporio
+    depends_on:
+      db-load: {condition: service_completed_successfully}
+      embeddings: {condition: service_healthy}
+
+volumes:
+  processed:
+  pgdata:

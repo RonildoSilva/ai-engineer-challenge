@@ -1,0 +1,24 @@
+{
+  "url": "http://127.0.0.1:8000/mcp",
+  "tools": [
+    "buscar_produtos",
+    "calcular_frete",
+    "consultar_pedido",
+    "consultar_politica",
+    "detalhar_produto",
+    "simular_pagamento",
+    "status_loja"
+  ],
+  "clientes": 20,
+  "chamadas": 500,
+  "erros": 0,
+  "duracao_s": 10.49,
+  "vazao_por_s": 47.7,
+  "latencia_ms": {
+    "p50": 123.7,
+    "p95": 1754.8,
+    "p99": 1853.5,
+    "max": 1908.9
+  },
+  "exemplos_de_erro": []
+}

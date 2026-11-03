@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from emporio.adapters.embedders import HashingEmbedder, OpenAICompatibleEmbedder
 from emporio.adapters.retrievers import HybridRetriever, LexicalRetriever
+from emporio.adapters.sqlite_repo import SqliteRepository
 from emporio.adapters.vector_sqlite import SqliteVectorIndex
 from emporio.config import Settings
 from emporio.domain.policies import PolicyStore
-from emporio.ports import Embedder, Retriever
+from emporio.ports import Embedder, Repository, Retriever
 from emporio.retrieval.documents import build_documents
 
 
@@ -27,15 +28,35 @@ def build_embedder(settings: Settings, base_url: str | None = None) -> Embedder 
     )
 
 
-def build_retriever(settings: Settings, embedding_url: str | None = None) -> Retriever:
-    docs = build_documents(settings.store_db, settings.policies_json)
+def build_repository(settings: Settings) -> Repository:
+    """SQLite (arquivo do pipeline, padrão) ou Postgres (perfil de escala)."""
+    if settings.store_backend == "postgres":
+        from emporio.adapters.postgres_repo import PostgresRepository  # noqa: PLC0415 (extra)
+
+        return PostgresRepository(settings.database_url or "")
+    return SqliteRepository(settings.store_db)
+
+
+def build_vector_index(settings: Settings):
+    """Índice vetorial: SQLite em memória (padrão) ou pgvector. None se não houver índice."""
+    if settings.vector_backend == "pgvector":
+        from emporio.adapters.pgvector import PgVectorIndex  # noqa: PLC0415 (extra)
+
+        return PgVectorIndex(settings.database_url or "")
+    return SqliteVectorIndex(settings.vectors_db) if settings.vectors_db.is_file() else None
+
+
+def build_retriever(
+    settings: Settings, embedding_url: str | None = None, repo: Repository | None = None
+) -> Retriever:
+    docs = build_documents(repo or build_repository(settings), settings.policies_json)
     lexical = LexicalRetriever(docs, PolicyStore.from_json(settings.policies_json))
     embedder = build_embedder(settings, embedding_url)
-    if embedder is None or not settings.vectors_db.is_file():
+    if embedder is None:
+        return lexical
+    index = build_vector_index(settings)
+    if index is None:
         return lexical
     return HybridRetriever(
-        lexical,
-        SqliteVectorIndex(settings.vectors_db),
-        embedder,
-        min_similarity=settings.retrieval_min_similarity,
+        lexical, index, embedder, min_similarity=settings.retrieval_min_similarity
     )

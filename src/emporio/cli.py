@@ -20,6 +20,7 @@ emporio llm check [--profile bonsai]                       conexão, contexto, c
 emporio ask "Quanto custa o Takamine GD20?" [--debug]      uma pergunta ao agente, de ponta a ponta
 emporio chat [--session ID] [--debug] [--transcript f.md]  conversa no terminal, com histórico
 emporio chat --list                                        sessões salvas
+emporio db load [--database-url postgresql://…]           perfil de escala: carrega o Postgres
 emporio eval intents | retrieval                           classificador e busca (evals/)
 emporio eval scenarios [--profile bonsai --profile qwen3-1.7b]   cenários (padrão: oráculo)
 """
@@ -37,7 +38,6 @@ from pathlib import Path
 import anyio
 from pydantic import ValidationError
 
-from emporio.adapters.sqlite_repo import SqliteRepository
 from emporio.agent.agent import Agent, Turn
 from emporio.agent.budget import ContextBudget
 from emporio.agent.chat import ChatSession, Transcript
@@ -61,7 +61,7 @@ from emporio.log import configure_logging, get_logger
 from emporio.mcp_server.server import build_server
 from emporio.pipeline.core import PipelineError
 from emporio.pipeline.stages import build_pipeline
-from emporio.retrieval.factory import build_retriever
+from emporio.retrieval.factory import build_repository, build_retriever
 from emporio.services import ServerUnavailableError, ensure_server
 
 log = get_logger(__name__)
@@ -158,6 +158,10 @@ def _add_service_commands(sub: argparse._SubParsersAction) -> None:
     ask.add_argument("question")
     ask.add_argument("--profile", help="perfil de LLM (padrão: LLM_PROFILE ou o default)")
     ask.add_argument("--debug", action="store_true", help="mostra as tools chamadas")
+    db = sub.add_parser("db", help="perfil de escala: Postgres + pgvector")
+    db_sub = db.add_subparsers(dest="action", required=True)
+    load = db_sub.add_parser("load", help="carrega store.db e vectors.db no Postgres")
+    load.add_argument("--database-url", help="padrão: DATABASE_URL")
     ev = sub.add_parser("eval", help="avaliação (resultados em evals/resultados/)")
     ev_sub = ev.add_subparsers(dest="action", required=True)
     ev_sub.add_parser("intents", help="classificador de intenção e guardrails (evals/intents.yaml)")
@@ -273,7 +277,7 @@ def _fmt_view(v: ProductView) -> str:
 
 def _catalog_cmd(args: argparse.Namespace, settings: Settings) -> int:
     def run(url: str | None) -> int:
-        svc = CatalogService(SqliteRepository(settings.store_db), build_retriever(settings, url))
+        svc = CatalogService(build_repository(settings), build_retriever(settings, url))
         if args.action == "search":
             r = svc.search(args.query, only_available=not args.all, limit=args.k)
             filters = {k: v for k, v in r.filters.items() if v not in (None, False)}
@@ -299,7 +303,7 @@ def _catalog_cmd(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _order_cmd(args: argparse.Namespace, settings: Settings) -> int:
-    svc = OrderService(SqliteRepository(settings.store_db), settings.reference_date)
+    svc = OrderService(build_repository(settings), settings.reference_date)
     if args.action == "show":
         r = svc.lookup(args.order, args.contato)
         print(r.view.describe() if r.view else r.message)
@@ -556,6 +560,25 @@ def _chat_cmd(args: argparse.Namespace, settings: Settings) -> int:
         store.close()
 
 
+def _db_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    from emporio.adapters.postgres_repo import load_from_pipeline  # noqa: PLC0415 (extra)
+
+    dsn = args.database_url or settings.database_url
+    if not dsn:
+        print("✘ informe --database-url ou DATABASE_URL", file=sys.stderr)
+        return 2
+    if not settings.store_db.is_file():
+        print(f"✘ {settings.store_db} não existe: rode `emporio pipeline run`", file=sys.stderr)
+        return 2
+    try:
+        counts = load_from_pipeline(dsn, settings.store_db, settings.vectors_db)
+    except RuntimeError as e:  # extra ausente
+        print(f"✘ {e}", file=sys.stderr)
+        return 2
+    print("✔ Postgres carregado: " + ", ".join(f"{k} {v}" for k, v in counts.items()))
+    return 0
+
+
 EVALS_DIR = Path("evals")
 
 
@@ -672,6 +695,7 @@ def main(argv: list[str] | None = None) -> int:
         "ask": _ask_cmd,
         "chat": _chat_cmd,
         "eval": _eval_cmd,
+        "db": _db_cmd,
     }
     try:
         return commands[args.command](args, settings)

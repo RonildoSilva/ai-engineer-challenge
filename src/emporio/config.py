@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -63,6 +63,22 @@ class Settings(BaseSettings):
     # similaridade mínima (cosseno) para um resultado vetorial contar. Calibrada com o
     # embeddinggemma: resposta certa ≥ 0,313; fora de escopo ≤ 0,292 (docs/embeddings_eval.md)
     retrieval_min_similarity: float = Field(default=0.30, ge=0.0, le=1.0)
+
+    # --- backends de dados (perfil de escala) -------------------------------------------
+    # sqlite: arquivos do pipeline (padrão, sem servidor). postgres/pgvector: o mesmo conteúdo
+    # carregado por `emporio db load` (requer `uv sync --extra scale` e DATABASE_URL).
+    store_backend: Literal["sqlite", "postgres"] = "sqlite"
+    vector_backend: Literal["sqlite", "pgvector"] = "sqlite"
+    database_url: str | None = None  # ex.: postgresql://emporio:emporio@127.0.0.1:5432/emporio
+
+    @model_validator(mode="after")
+    def _database_url_required(self) -> Settings:
+        uses_pg = self.store_backend == "postgres" or self.vector_backend == "pgvector"
+        if uses_pg and not self.database_url:
+            raise ValueError(
+                "STORE_BACKEND=postgres ou VECTOR_BACKEND=pgvector exigem DATABASE_URL"
+            )
+        return self
 
     # --- histórico de conversas --------------------------------------------------------
     # mensagens retomadas ao continuar uma sessão (o orçamento de contexto ainda corta o excesso)

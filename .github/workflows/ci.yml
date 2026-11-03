@@ -39,3 +39,55 @@ jobs:
 
       - name: Verificação completa (scripts/check.sh)
         run: ./scripts/check.sh
+
+  # Perfil de escala: os adaptadores Postgres/pgvector passam nas mesmas suítes de contrato do
+  # SQLite, contra um Postgres real com pgvector (imagem fixada por digest, a mesma do compose).
+  postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
+        env:
+          POSTGRES_USER: emporio
+          POSTGRES_PASSWORD: emporio
+          POSTGRES_DB: emporio
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U emporio -d emporio"
+          --health-interval 3s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Instala uv (versão fixada, instalador oficial)
+        run: |
+          UV_VERSION=$(grep -oP 'UV_VERSION_PINNED="\K[\d.]+' scripts/setup.sh)
+          curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Dependências com o extra de escala
+        run: uv sync --locked --extra scale
+
+      - name: Suítes de contrato no Postgres + pgvector
+        env:
+          EMPORIO_TEST_DATABASE_URL: postgresql://emporio:emporio@localhost:5432/emporio
+        run: uv run --locked pytest tests/test_postgres.py -m postgres -v
+
+  # A imagem do projeto (deploy/Dockerfile) constrói do zero e responde dentro do container.
+  docker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compose válido
+        run: docker compose -f deploy/docker-compose.yml --profile scale --profile cli config -q
+
+      - name: Build da imagem
+        run: docker build -f deploy/Dockerfile -t emporio:ci .
+
+      - name: Smoke test no container (sem modelos)
+        run: |
+          docker run --rm -e EMBEDDING_BACKEND=none emporio:ci emporio catalog show "Takamine GD20" | tee out.txt
+          grep -q "2.199,00" out.txt
+          docker run --rm emporio:ci sh -c 'test ! -e /app/_raw && test ! -e /app/.env'

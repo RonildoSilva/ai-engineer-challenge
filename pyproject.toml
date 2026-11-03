@@ -18,6 +18,10 @@ dependencies = [
     "rich>=13.7",
 ]
 
+[project.optional-dependencies]
+# Perfil de escala (Postgres + pgvector): `uv sync --extra scale`. O padrão continua sem servidor.
+scale = ["psycopg[binary]>=3.2"]
+
 [project.scripts]
 emporio = "emporio.cli:main"
 
@@ -46,7 +50,10 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "-m 'not integration'"   # padrão rápido; integração: pytest -m integration
-markers = ["integration: sobe o LLM local real (lento, requer artefatos baixados)"]
+markers = [
+    "integration: sobe o LLM local real (lento, requer artefatos baixados)",
+    "postgres: perfil de escala; roda com EMPORIO_TEST_DATABASE_URL (Postgres + pgvector)",
+]
 
 [tool.ruff]
 line-length = 100

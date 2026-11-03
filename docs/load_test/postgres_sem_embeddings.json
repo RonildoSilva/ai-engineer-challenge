@@ -1,0 +1,22 @@
+{
+  "url": "http://127.0.0.1:8001/mcp",
+  "tools": [
+    "calcular_frete",
+    "consultar_pedido",
+    "detalhar_produto",
+    "simular_pagamento",
+    "status_loja"
+  ],
+  "clientes": 20,
+  "chamadas": 500,
+  "erros": 0,
+  "duracao_s": 1.87,
+  "vazao_por_s": 267.4,
+  "latencia_ms": {
+    "p50": 41.5,
+    "p95": 185.3,
+    "p99": 253.0,
+    "max": 308.5
+  },
+  "exemplos_de_erro": []
+}
