@@ -31,6 +31,9 @@ MERMAID_CONFIG = (
     ' "nodeSpacing": 40, "rankSpacing": 45}}'
 )
 BLOCK = re.compile(r"```mermaid\n(.*?)```", re.DOTALL)
+REPO_URL = "https://github.com/RonildoSilva/ai-engineer-challenge/blob/main"
+# badge de CI: imagem ao vivo, mostraria o estado do CI no momento da geração e não o do commit
+BADGE = re.compile(r"^\[!\[[^\]]*\]\([^)]*badge[^)]*\)\]\([^)]*\)\n+", re.MULTILINE)
 
 CSS = """
 @page { size: A4; margin: 16mm 14mm; }
@@ -94,6 +97,17 @@ def absolute_images(md: str, base: Path) -> str:
     return re.sub(r"\]\((?!https?:|#)([^)]+\.(?:png|svg|jpg))\)", fix, md)
 
 
+def repo_links(md: str, base: Path) -> str:
+    """Links relativos para outros arquivos do repositório → URL no GitHub (no PDF não há repo)."""
+
+    def fix(m: re.Match[str]) -> str:
+        target, anchor = m.group(1), m.group(2) or ""
+        rel = (base / target).resolve().relative_to(ROOT)
+        return f"]({REPO_URL}/{rel.as_posix()}{anchor})"
+
+    return re.sub(r"\]\((?!https?:|#|/)([^)#\s]+?)(#[^)\s]*)?\)", fix, md)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("files", nargs="+", type=Path, help="arquivos Markdown, na ordem")
@@ -112,7 +126,9 @@ def main() -> int:
         for i, f in enumerate(args.files):
             md = f.read_text(encoding="utf-8")
             # imagens relativas ao arquivo de origem → caminho absoluto (o HTML fica em outro lugar)
+            md = BADGE.sub("", md)
             md = absolute_images(md, f.resolve().parent)
+            md = repo_links(md, f.resolve().parent)
             md = render_mermaid(md, ROOT / "data/processed/docs_build/mermaid")
             parts.append(md if i == 0 else f'\n<div class="doc-break"></div>\n\n{md}')
         source = tmp / "doc.md"

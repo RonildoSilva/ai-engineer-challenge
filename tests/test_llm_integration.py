@@ -328,7 +328,9 @@ async def test_agent_end_to_end_with_real_bonsai(server, built_store):
         _env_file=None, data_processed_dir=built_store.parent, embedding_backend="fake"
     )
     profile = get_profile(settings, "bonsai")
-    llm = LLMClient(profile.model_copy(update={"base_url": f"{server}/v1"}))
+    # temperatura 0: decodificação gulosa, para o teste não depender da amostragem (a qualidade de
+    # redação com a temperatura de produção é medida na avaliação, não aqui)
+    llm = LLMClient(profile.model_copy(update={"base_url": f"{server}/v1", "temperature": 0.0}))
     budget = ContextBudget(llm.context_window(), profile.max_output_tokens)
     async with McpToolbox(build_server(settings)) as toolbox:
         agent = Agent(llm, toolbox, reference_date=date(2026, 3, 25), budget=budget)
@@ -364,7 +366,9 @@ def test_rest_api_end_to_end_with_real_bonsai(server, built_store, tmp_path):
         _env_file=None, data_processed_dir=built_store.parent, embedding_backend="fake"
     )
     profile = get_profile(settings, "bonsai")
-    llm = LLMClient(profile.model_copy(update={"base_url": f"{server}/v1"}))
+    # temperatura 0: decodificação gulosa, para o teste não depender da amostragem (a qualidade de
+    # redação com a temperatura de produção é medida na avaliação, não aqui)
+    llm = LLMClient(profile.model_copy(update={"base_url": f"{server}/v1", "temperature": 0.0}))
     budget = ContextBudget(llm.context_window(), profile.max_output_tokens)
     cfg = ApiConfig(profile="bonsai", model="bonsai", reference_date=date(2026, 3, 25),
                     budget=budget)  # fmt: skip
