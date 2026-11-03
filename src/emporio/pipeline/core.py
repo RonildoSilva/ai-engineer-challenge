@@ -279,6 +279,36 @@ class Pipeline:
         self._save_state(state)
         return RunReport(results)
 
+    def run_stage(self, name: str, *, force: bool = False) -> StageResult:
+        """Executa **só** a etapa `name`, como uma task de orquestrador (Airflow, Dagster).
+
+        Diferente de `run`, não executa dependências: elas precisam estar em dia (quem garante a
+        ordem é o DAG do orquestrador). Dependência desatualizada ou falha da etapa levantam
+        `PipelineError`, para o orquestrador marcar a task como falha e não seguir adiante.
+        """
+        if name not in self.stages:
+            raise PipelineError(f"etapa inexistente: '{name}'")
+        state = self.load_state()
+        stages_state: dict[str, Any] = state.setdefault("stages", {})
+        fps: dict[str, str] = {}
+        for dep in self.order([name])[:-1]:  # dependências, em ordem topológica
+            fps[dep] = self._fingerprint(self.stages[dep], fps)
+            if not self._is_fresh(self.stages[dep], stages_state.get(dep, {}), fps[dep]):
+                raise PipelineError(
+                    f"dependência '{dep}' de '{name}' não está em dia: rode a task dela antes"
+                )
+        stage = self.stages[name]
+        fp = self._fingerprint(stage, fps)
+        prev = stages_state.get(name, {})
+        if not force and self._is_fresh(stage, prev, fp):
+            log.info("etapa em dia (pulada)", extra={"stage": name})
+            return StageResult(name, "up_to_date", metrics=prev.get("metrics", {}))
+        result = self._execute(stage, fp, stages_state)
+        self._save_state(state)
+        if result.status != "ok":
+            raise PipelineError(f"etapa '{name}' falhou: {result.error}")
+        return result
+
     def _execute(self, stage: Stage, fp: str, stages_state: dict[str, Any]) -> StageResult:
         for out in stage.outputs:  # só o diretório pai; a etapa cria a própria saída
             out.parent.mkdir(parents=True, exist_ok=True)

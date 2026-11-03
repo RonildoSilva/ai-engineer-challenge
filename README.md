@@ -275,7 +275,7 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>588 testes, ~35 s, offline<br/>+51 com Postgres, job próprio]
+        L2 --> L3[pytest unitário<br/>594 testes, ~35 s, offline<br/>+51 com Postgres, job próprio]
         L3 --> L4[pytest -m integration<br/>9 testes, ~5 min,<br/>sobe os modelos reais]
     end
     K -.-> K2
@@ -298,6 +298,7 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Relatório de dados | cada número de `docs/data_report.md` continua verdadeiro sobre `data/raw` (11) | `tests/test_data_findings.py` |
 | Orquestrador | ordem topológica, ciclo/dependência inexistente rejeitados, execução incremental por conteúdo, invalidação por entrada/código/versão, saída adulterada detectada, falha isola dependentes, linhagem (19) | `tests/test_pipeline_core.py` |
 | Id de requisição | `request_id` só dentro do contexto, contexto aninhado restaura o anterior, um id por turno em todos os logs, chamadas de tool no MCP rastreáveis (3) | `tests/test_request_id.py` |
+| DAG do Airflow | arquivo real do DAG importado com stub do Airflow: **uma task por etapa e as mesmas dependências**, cada task roda a própria etapa, grafo topológico; `run_task` exige dependências em dia, roda incremental (refaz e depois pula) e falha para o orquestrador quando a etapa falha (6) | `tests/test_airflow_dag.py` |
 | Config, logs e CLI | defaults, sobrescrita por ambiente, **config inválida falha cedo**, logs texto/JSON, `emporio pipeline` e códigos de saída (12) | `tests/test_config_cli.py` |
 | Camada de dados | regras de tratamento, 7 tipos de linha inválida reportados com `arquivo:linha campo`, integridade referencial, **7 violações barradas pelos `CHECK`s do banco**, banco anterior intacto quando a validação falha, mudança de regra refaz o `transform` (41) | `tests/test_data_layer.py` |
 | Repository | **suíte de contrato** (22, reutilizável para o Postgres) + somente leitura, injeção de SQL, uma conexão por thread (4) | `tests/contract/`, `tests/test_sqlite_repository.py` |
@@ -367,6 +368,24 @@ flowchart TD
   progresso e não deixa estado inconsistente.
 - **Portável:** cada etapa é uma função `f(ctx) -> métricas` que não depende do runner, e corresponde 1:1 a
   uma task do Airflow ou do Dagster.
+
+**Template de DAG do Airflow** ([`dags/emporio_dag.py`](dags/emporio_dag.py)): as tasks e as dependências são
+**geradas** das mesmas etapas (`emporio.pipeline.airflow.task_graph`), sem lista mantida à mão, então o DAG
+não diverge do pipeline local. Cada task chama `run_task(etapa)`, que executa só aquela etapa
+(`Pipeline.run_stage`) com o mesmo cache e a mesma linhagem. Se uma dependência não estiver em dia, ou se a
+etapa falhar, a task levanta erro e o Airflow para ali. Funciona com Airflow 2 e 3, agendamento diário,
+`catchup=False` e uma execução por vez.
+
+```mermaid
+flowchart LR
+    BS[build_stages<br/>etapas + dependências] --> CLI[emporio pipeline run<br/>orquestrador próprio]
+    BS --> TG[task_graph] --> DAG[dags/emporio_dag.py<br/>Airflow: 1 task por etapa]
+    DAG -->|run_task| RS[Pipeline.run_stage<br/>mesma função, cache e linhagem]
+```
+
+O Airflow não é dependência do projeto: o teste importa o arquivo real do DAG com um *stub* mínimo do Airflow
+e confere que as tasks e as dependências são exatamente as etapas do pipeline. Para usar de verdade, instale o
+projeto no ambiente do Airflow e copie o arquivo para a pasta de DAGs.
 
 ## Manual de políticas
 
@@ -831,7 +850,7 @@ interfaces.
 
 | Peça | Padrão (1 comando, sem servidor) | Escala (por configuração) | Status |
 |---|---|---|---|
-| Orquestração | DAG próprio, incremental, com linhagem | Airflow/Dagster (mesmas funções de etapa) | ✅ DAG · template Airflow *(planejado)* |
+| Orquestração | DAG próprio, incremental, com linhagem | Airflow: `dags/emporio_dag.py`, gerado das mesmas etapas (testado sem instalar o Airflow) | ✅ |
 | Configuração | `.env` validado na inicialização (falha cedo) | variáveis de ambiente / secret manager | ✅ |
 | Logs | texto no terminal, com o id do turno (`request_id`) em cada linha | JSON, uma linha por evento (`LOG_FORMAT=json`); o `request_id` liga todos os eventos de um atendimento | ✅ |
 | Dados | SQLite somente leitura atrás de `Repository` | Postgres (`STORE_BACKEND=postgres`), mesma suíte de contrato, no CI | ✅ |
@@ -1004,7 +1023,7 @@ Detalhes e como adicionar modelos: [`models/README.md`](models/README.md).
 | Políticas | **Curadoria versionada** do PDF, verificada pelo pipeline (cobertura, versão do PDF, fatos), publicada por seção | O manual tem ~3,2 mil tokens; vector DB seria desproporcional. A revisão humana resolve as contradições do PDF, e a verificação automática garante que ela não perde nem desatualiza nada. |
 | Dados | CSV → validação → limpeza → **SQLite** (atrás de uma interface `Repository`) | Vem com o Python (zero dependência nova), um arquivo só, esquema com restrições que registram as decisões do relatório, SQL com parâmetros, mesmo motor para o histórico. Com 65 produtos, um servidor seria desproporcional; Postgres entra como adaptador de escala. |
 | Busca | **Híbrida**: lexical + vetorial com fusão RRF, atrás da interface `Retriever` | A lexical acerta nomes exatos ("Takamine GD20"); a vetorial resolve perguntas sem palavras em comum ("esquecer meu cadastro"); a fusão às vezes acerta o que nenhuma das duas acerta sozinha (e às vezes não: ver a tabela em [Busca híbrida](#busca-híbrida)). Vetores em SQLite com busca exata em memória: com 75 documentos, um banco vetorial não se paga. **pgvector** fica como adaptador de escala, validado pela mesma suíte de contrato. |
-| Orquestração | **DAG próprio** (`emporio pipeline`), sem Airflow | Não há nada para agendar (dados estáticos, processados em menos de 1 s). Airflow exigiria scheduler, webserver e banco de metadados. Cada etapa corresponde 1:1 a uma task do Airflow quando houver sync com um sistema real. |
+| Orquestração | **DAG próprio** (`emporio pipeline`), sem Airflow | Não há nada para agendar (dados estáticos, processados em menos de 1 s). Airflow exigiria scheduler, webserver e banco de metadados. Cada etapa corresponde 1:1 a uma task do Airflow quando houver sync com um sistema real; o template está em `dags/emporio_dag.py`. |
 | Reprodutibilidade | uv + `uv.lock` + Python gerenciado + manifesto SHA-256 | A equipe avaliadora reproduz o ambiente idêntico. |
 
 ## Tratamento de dados e suposições
@@ -1047,7 +1066,7 @@ flowchart TD
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR
-        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::done --> C17["17 · exemplos"]:::done --> C17b["17b · pendências<br/>da revisão"]:::done --> CX["19–21 · Airflow,<br/>REST, UI"] --> C18["README final"]
+        C15["15 · avaliação"]:::done --> C16["16 · escala<br/>Postgres/pgvector"]:::done --> C17["17 · exemplos"]:::done --> C17b["17b · pendências<br/>da revisão"]:::done --> C19["19 · DAG<br/>Airflow"]:::done --> C20["20 · API REST<br/>/chat + SSE"]:::next --> C21["21 · front<br/>web"] --> C18["README final"]
     end
     F1 --> F2 --> F3 --> F4 --> F5
     classDef next fill:#fde68a,stroke:#b45309,color:#000
@@ -1069,6 +1088,7 @@ docs/            relatório de dados (data_report.md), avaliação de embeddings
                  workflow com IA (planejado)
 evals/           cenários, gabaritos e resultados (evals/resultados/README.md)
 deploy/          Dockerfile e docker-compose (padrão e perfil scale com Postgres + pgvector)
+dags/            template de DAG do Airflow, gerado das etapas do pipeline
 examples/        5 conversas com o Bonsai, comentadas (examples/README.md)
 models/          manifest.tsv (versionado) + binários (não versionados)
 scripts/         setup, verificação (check.sh), download de modelos, start do llamafile, smoke test,
