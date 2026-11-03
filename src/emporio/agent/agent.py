@@ -122,8 +122,11 @@ class Agent:
         turn = Turn(user=user_message, answer="")
         t0 = time.perf_counter()
         try:
-            fitted, evidence = await self._prepare(user_message, turn)
-            await self._loop(fitted, evidence, turn)
+            fitted, evidence, direct = await self._prepare(user_message, turn)
+            if direct:
+                turn.answer = direct  # só faltam dados do cliente: resposta pronta, sem LLM
+            else:
+                await self._loop(fitted, evidence, turn)
         except LLMUnavailableError as e:
             log.warning("LLM indisponível: resposta de segurança", extra={"reason": str(e)})
             turn.fallback = f"LLM indisponível: {e}"
@@ -147,8 +150,12 @@ class Agent:
         )
         return turn
 
-    async def _prepare(self, user_message: str, turn: Turn) -> tuple[Fitted, list[str]]:
-        """Roteia, pré-busca e encaixa tudo na janela. Devolve as mensagens e as evidências."""
+    async def _prepare(self, user_message: str, turn: Turn) -> tuple[Fitted, list[str], str | None]:
+        """Roteia, pré-busca e encaixa tudo na janela.
+
+        Devolve as mensagens, as evidências e, se houver, a resposta pronta da pré-busca.
+        """
+        direct = None
         system, history = self.messages[0], self.messages[1:]
         user = {"role": "user", "content": user_message}
         past = [m["content"] for m in history if m["role"] == "user"]
@@ -160,6 +167,7 @@ class Agent:
             turn.route = route(user_message, self.last_route, past)
             self.last_route = turn.route
             pf = await run_prefetch(turn.route, user_message, self.toolbox, self.budget)
+            direct = pf.direct_answer
             turn.prefetched = [
                 ToolTrace(c.name, _masked(c.arguments), c.result.ok, c.content, 0.0)
                 for c in pf.calls
@@ -184,7 +192,7 @@ class Agent:
                     "tools": fitted.dropped_tools,
                 },
             )
-        return fitted, evidence
+        return fitted, evidence, direct
 
     @staticmethod
     def _turn_system(system: dict[str, Any], pf: Prefetch) -> dict[str, Any]:

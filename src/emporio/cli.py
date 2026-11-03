@@ -18,6 +18,8 @@ emporio mcp [--http] [--host 127.0.0.1] [--port 8000]      servidor MCP (stdio o
 emporio llm list                                           perfis de LLM configurados
 emporio llm check [--profile bonsai]                       conexão, contexto, chat e tool calling
 emporio ask "Quanto custa o Takamine GD20?" [--debug]      uma pergunta ao agente, de ponta a ponta
+emporio chat [--session ID] [--debug] [--transcript f.md]  conversa no terminal, com histórico
+emporio chat --list                                        sessões salvas
 """
 
 from __future__ import annotations
@@ -28,12 +30,16 @@ import contextlib
 import signal
 import sys
 from datetime import datetime
+from pathlib import Path
 
+import anyio
 from pydantic import ValidationError
 
 from emporio.adapters.sqlite_repo import SqliteRepository
-from emporio.agent.agent import Agent
+from emporio.agent.agent import Agent, Turn
 from emporio.agent.budget import ContextBudget
+from emporio.agent.chat import ChatSession, Transcript
+from emporio.agent.history import HistoryStore
 from emporio.agent.llm import (
     LLMClient,
     LLMConfigError,
@@ -150,6 +156,12 @@ def _add_service_commands(sub: argparse._SubParsersAction) -> None:
     ask.add_argument("question")
     ask.add_argument("--profile", help="perfil de LLM (padrão: LLM_PROFILE ou o default)")
     ask.add_argument("--debug", action="store_true", help="mostra as tools chamadas")
+    chat = sub.add_parser("chat", help="conversa no terminal com histórico (sobe os servidores)")
+    chat.add_argument("--profile", help="perfil de LLM (padrão: LLM_PROFILE ou o default)")
+    chat.add_argument("--session", help="continua uma sessão anterior (id)")
+    chat.add_argument("--list", action="store_true", help="lista as sessões salvas e sai")
+    chat.add_argument("--debug", action="store_true", help="mostra assunto, pré-busca e tools")
+    chat.add_argument("--transcript", type=Path, help="grava a conversa em markdown")
 
 
 def _pipeline_cmd(args: argparse.Namespace, settings: Settings) -> int:
@@ -394,8 +406,12 @@ def _llm_cmd(args: argparse.Namespace, settings: Settings) -> int:
         return 1
 
 
-def _ask_cmd(args: argparse.Namespace, settings: Settings) -> int:
-    profile = get_profile(settings, args.profile)
+def _run_agent(settings: Settings, profile_name: str | None, body) -> int:
+    """Sobe o que faltar (LLM local, embeddings), abre o MCP e roda `await body(agent, llm)`.
+
+    Servidores já no ar são reaproveitados; os que esta execução subiu são encerrados ao sair.
+    """
+    profile = get_profile(settings, profile_name)
 
     def run(embedding_url: str | None) -> int:
         with contextlib.ExitStack() as stack:
@@ -412,42 +428,118 @@ def _ask_cmd(args: argparse.Namespace, settings: Settings) -> int:
             llm = LLMClient(profile.model_copy(update={"base_url": llm_url}))
             server = build_server(settings, embedding_url=embedding_url)
 
-            async def go():
+            async def go() -> int:
                 async with McpToolbox(server) as toolbox:
                     budget = ContextBudget(llm.context_window(), profile.max_output_tokens)
                     agent = Agent(
                         llm, toolbox, reference_date=settings.reference_date, budget=budget
                     )
-                    return await agent.respond(args.question)
+                    return await body(agent, llm)
 
-            turn = asyncio.run(go())
-        print(turn.answer)
-        if args.debug:
-            print(
-                f"\n— {turn.llm_calls} chamada(s) ao LLM em {turn.latency_s:.1f} s, "
-                f"prompt ~{turn.prompt_tokens} tokens",
-                file=sys.stderr,
-            )
-            if turn.route:
-                intents = ", ".join(i.value for i in turn.route.intents)
-                offered = ", ".join(turn.tools_offered) or "nenhuma"
-                print(f"  · assunto: {intents} | tools oferecidas: {offered}", file=sys.stderr)
-            for t in turn.prefetched:
-                print(f"  · pré-busca {t.name}({t.arguments}) {t.output[:160]}", file=sys.stderr)
-            if turn.price_retry:
-                print(f"  · valores sem fonte corrigidos: {turn.price_retry}", file=sys.stderr)
-            for t in turn.tools:
-                status = "ok" if t.ok else "erro"
-                print(f"  · {t.name}({t.arguments}) [{status}] {t.output[:160]}", file=sys.stderr)
-            if turn.fallback:
-                print(f"  · resposta de segurança: {turn.fallback}", file=sys.stderr)
-        return 0 if not turn.fallback else 1
+            return asyncio.run(go())
 
     try:
         return _with_embeddings(settings, run)
     except ServerUnavailableError as e:
         print(f"✘ {e}", file=sys.stderr)
         return 1
+
+
+def _print_trace(turn: Turn) -> None:
+    if turn.llm_calls == 0 and not turn.fallback:
+        print(f"— resposta pronta, sem LLM ({turn.latency_s:.2f} s)", file=sys.stderr)
+    else:
+        print(
+            f"— {turn.llm_calls} chamada(s) ao LLM em {turn.latency_s:.1f} s, "
+            f"prompt ~{turn.prompt_tokens} tokens",
+            file=sys.stderr,
+        )
+    if turn.route:
+        intents = ", ".join(i.value for i in turn.route.intents)
+        offered = ", ".join(turn.tools_offered) or "nenhuma"
+        print(f"  · assunto: {intents} | tools oferecidas: {offered}", file=sys.stderr)
+    for t in turn.prefetched:
+        print(f"  · pré-busca {t.name}({t.arguments}) {t.output[:160]}", file=sys.stderr)
+    if turn.price_retry:
+        print(f"  · valores sem fonte corrigidos: {turn.price_retry}", file=sys.stderr)
+    for t in turn.tools:
+        status = "ok" if t.ok else "erro"
+        print(f"  · {t.name}({t.arguments}) [{status}] {t.output[:160]}", file=sys.stderr)
+    if turn.fallback:
+        print(f"  · resposta de segurança: {turn.fallback}", file=sys.stderr)
+
+
+def _ask_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    async def body(agent: Agent, _llm: LLMClient) -> int:
+        turn = await agent.respond(args.question)
+        print(turn.answer)
+        if args.debug:
+            print(file=sys.stderr)
+            _print_trace(turn)
+        return 0 if not turn.fallback else 1
+
+    return _run_agent(settings, args.profile, body)
+
+
+CHAT_HELP = "Comandos: /nova (outra conversa), /sessoes, /ajuda, /sair (ou Ctrl+D)."
+
+
+def _chat_cmd(args: argparse.Namespace, settings: Settings) -> int:
+    store = HistoryStore(settings.history_db)
+    if args.list:
+        for s in store.sessions():
+            print(f"{s.id}  {s.updated_at}  {s.profile:<10} {s.messages:>3} mensagens")
+        return 0
+    if args.session and store.get_session(args.session) is None:
+        print(f"✘ sessão '{args.session}' não existe (veja `emporio chat --list`)", file=sys.stderr)
+        return 2
+    profile = get_profile(settings, args.profile)
+    print(f"Subindo o atendimento ({profile.name})…", file=sys.stderr)
+
+    async def body(agent: Agent, llm: LLMClient) -> int:
+        session = ChatSession(agent, store, profile=profile.name, session_id=args.session,
+                              window=settings.history_window)  # fmt: skip
+        if args.transcript:
+            session.transcript = Transcript(
+                settings.path(args.transcript), profile.name,
+                llm.profile.resolved_model(), session.session_id,
+            )  # fmt: skip
+        await session.open()
+        resumed = f", {session.resumed} mensagens retomadas" if session.resumed else ""
+        print(f"Sessão {session.session_id}{resumed}. {CHAT_HELP}\n")
+        while True:
+            try:
+                text = (await anyio.to_thread.run_sync(input, "você> ")).strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if not text:
+                continue
+            if text in {"/sair", "/exit", "/quit"}:
+                break
+            if text == "/ajuda":
+                print(CHAT_HELP)
+                continue
+            if text == "/sessoes":
+                for s in store.sessions(limit=10):
+                    print(f"  {s.id}  {s.updated_at}  {s.messages} mensagens")
+                continue
+            if text == "/nova":
+                await session.new()
+                print(f"Nova sessão {session.session_id}.\n")
+                continue
+            turn = await session.send(text)
+            print(f"\nMel> {turn.answer}\n")
+            if args.debug:
+                _print_trace(turn)
+                print(file=sys.stderr)
+        print(f"Até mais! Para continuar: emporio chat --session {session.session_id}")
+        return 0
+
+    try:
+        return _run_agent(settings, args.profile, body)
+    finally:
+        store.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -472,6 +564,7 @@ def main(argv: list[str] | None = None) -> int:
         "mcp": _mcp_cmd,
         "llm": _llm_cmd,
         "ask": _ask_cmd,
+        "chat": _chat_cmd,
     }
     try:
         return commands[args.command](args, settings)

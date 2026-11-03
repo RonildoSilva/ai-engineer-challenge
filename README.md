@@ -38,7 +38,7 @@ e o baseline é o `Bonsai-1.7B` rodando em CPU com o runtime oficial do llamafil
 
 ## Arquitetura
 
-### Visão geral *(chat no terminal e histórico em SQLite: planejados)*
+### Visão geral
 
 ```mermaid
 flowchart LR
@@ -197,6 +197,23 @@ SKIP_MODEL=1 ./scripts/setup.sh    # sem runtime/modelo local (ex.: usar só API
 
 ## Como rodar
 
+Depois do `./scripts/setup.sh`, um comando abre o atendimento no terminal. Ele sobe o Bonsai e o servidor de
+embeddings se não estiverem no ar e encerra ao sair os que ele mesmo subiu:
+
+```bash
+uv run emporio chat                     # conversa com a Mel (histórico salvo em data/processed/history.db)
+uv run emporio chat --debug             # + assunto, pré-busca, tools e tokens de cada turno
+uv run emporio chat --transcript conversa.md   # grava a conversa em markdown (com as tools usadas)
+uv run emporio chat --list              # sessões salvas
+uv run emporio chat --session 28d68dd5  # continua uma conversa
+uv run emporio chat --profile anthropic # outro perfil de LLM (config/llm_profiles.yaml)
+```
+
+Dentro do chat: `/nova` (outra conversa), `/sessoes`, `/ajuda`, `/sair` (ou Ctrl+D). No Bonsai em CPU de
+notebook, cada resposta leva de 1 a 2,5 minutos (ver [Agente](#agente)).
+
+Servidores e comandos avulsos:
+
 ```bash
 ./scripts/start_llamafile.sh         # terminal 1: Bonsai-1.7B em http://127.0.0.1:8080/v1 (modelo "bonsai")
 MODE=embedding ./scripts/start_llamafile.sh   # (opcional) embeddings em http://127.0.0.1:8081/v1
@@ -225,10 +242,10 @@ uv run emporio mcp                                 # servidor MCP via stdio (par
 uv run emporio mcp --http --port 8000              # servidor MCP via Streamable HTTP em /mcp
 uv run emporio llm list                            # perfis de LLM (testados × referência)
 uv run emporio llm check [--profile bonsai]        # conexão, contexto, chat e tool calling
-uv run emporio ask "Quanto custa o Takamine GD20?" --debug   # o agente, de ponta a ponta
+uv run emporio ask "Quanto custa o Takamine GD20?" --debug   # uma pergunta ao agente, sem histórico
 ```
 
-> Chat, servidor MCP e avaliação serão documentados aqui conforme forem implementados.
+> A avaliação será documentada aqui quando for implementada.
 
 ## Verificação (testes e CI)
 
@@ -246,7 +263,7 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>474 testes, ~30 s, offline]
+        L2 --> L3[pytest unitário<br/>489 testes, ~30 s, offline]
         L3 --> L4[pytest -m integration<br/>9 testes, ~5 min,<br/>sobe os modelos reais]
     end
     K -.-> K2
@@ -278,7 +295,8 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Cliente LLM | perfis do projeto válidos (online marcados como referência), seleção e sobrescritas, **chave de API ausente com erro claro**, contexto lido de `/props` e fallback, temperatura e `max_tokens` do perfil, tools só se suportadas, **normalização de respostas de modelos pequenos** (JSON inválido nos argumentos, cercas de código, tool call escrita como texto, bloco `<think>`), servidor fora do ar e erro 5xx, CLI (25) | `tests/test_llm_client.py` |
 | Detecção de assunto | 16 frases reais com uma intenção e 5 com várias ("quanto custa o GD20 e dá pra fazer em 10x?"), devolução não vira busca de catálogo, assunto desconhecido, subconjunto de tools, "18h"/"12x"/e-mail não viram código de modelo, dados citados (pedido, e-mail, telefone, valor, parcelas, cidade), "meu telefone é…" não é pergunta sobre a loja, **mensagem só com dados herda a intenção**, dados completados pelo histórico, trecho do produto na frase (32) | `tests/test_router.py` |
 | Orçamento de contexto | disponível = janela − resposta − margem, **8k × 128k** (seções e produtos pedidos), seções escolhidas pelo **custo publicado pelo MCP**, tudo cabe em 128k, em 8k o histórico antigo sai primeiro e aos pares, ordem das mensagens, **resultado de tool nunca cortado ao meio**, tools que não cabem saem e são reportadas (9) | `tests/test_budget.py` |
-| Agente | persona e contexto (data de referência, loja aberta) no system prompt, tools do MCP no formato do LLM, loop tool → resultado → resposta, histórico só com perguntas e respostas, argumento inválido / tool inexistente / erro da tool devolvidos ao modelo, **nome de tool quase certo corrigido**, **resposta de segurança** (limite de rodadas, LLM fora do ar, resposta vazia), PII mascarada no rastro, agente via stdio; **pré-busca**: "posso devolver?" em 1 chamada sem tools com a regra dos 7 dias, preço pronto e "sem promoção" explícito, preço do produto alimentando a simulação de 10x, pedido sem dados → pede os dados → pré-busca no turno seguinte, acessório, assunto desconhecido, janela grande; **preço sem fonte**: uma correção e depois resposta de segurança (26) | `tests/test_agent.py` |
+| Agente | persona e contexto (data de referência, loja aberta) no system prompt, tools do MCP no formato do LLM, loop tool → resultado → resposta, histórico só com perguntas e respostas, argumento inválido / tool inexistente / erro da tool devolvidos ao modelo, **nome de tool quase certo corrigido**, **resposta de segurança** (limite de rodadas, LLM fora do ar, resposta vazia), PII mascarada no rastro, agente via stdio; **pré-busca**: "posso devolver?" em 1 chamada sem tools com a regra dos 7 dias, preço pronto e "sem promoção" explícito, preço do produto alimentando a simulação de 10x, pedido sem dados → pede os dados → pré-busca no turno seguinte, acessório, assunto desconhecido, janela grande; **preço sem fonte**: uma correção e depois resposta de segurança; pedido sem dados respondido sem LLM, pedindo só o que falta (28) | `tests/test_agent.py` |
+| Chat e histórico | e-mail/telefone mascarados ao gravar (pedido e preço preservados), sessão de ida e volta com metadados do turno, janela sempre começando pelo cliente, ordem das sessões e exclusão em cascata, uma conexão por thread, **sessão retomada devolve o histórico e o assunto** ("é o 8, telefone…" continua o pedido), sessão inexistente, `/nova` limpa, transcrição markdown com tools e sem PII, CLI `emporio chat` (conversa, retomada, `--list`, `/nova`, erro) (13) | `tests/test_chat.py` |
 | Busca | documentos (descrição suja não entra), índice vetorial, **suíte de contrato do `Retriever`** (lexical e híbrido), fusão RRF, limiar de similaridade, **degradação para lexical** (serviço fora do ar, índice vazio, modelo trocado) e recuperação, cache de vetores, etapa sem modelo, CLI (44) | `tests/test_retrieval.py`, `tests/contract/` |
 | Modelos reais | **chat:** servidor sobe pelo script, contexto 8192, alias `bonsai`, responde e devolve **tool call estruturado**; **embeddings:** vetores de 768 dimensões e pergunta sem palavras em comum ("esquecer meu cadastro") mais próxima da seção certa; **busca híbrida com o modelo real** com a porta configurada ocupada por outro serviço (sobe em porta livre, acha privacidade, ignora "receita de bolo"); **encerrar o `emporio mcp` (SIGTERM ou SIGHUP) encerra o servidor de embeddings**; **`LLMClient` com o Bonsai real** (contexto 8192 lido de `/props` e tool call); **agente de ponta a ponta** (mesma conversa): "Quanto custa o Takamine GD20?" → pré-busca `detalhar_produto` → 1 chamada → R$ 2.199 sem "promocional"; "posso devolver?" → pré-busca da política → regra dos 7 dias (9) | `tests/test_llm_integration.py` |
 
@@ -565,8 +583,9 @@ sequenceDiagram
    dados citados (número do pedido, e-mail/telefone, valor, parcelas, cidade). Uma mensagem só com dados
    ("é o 8, telefone …") herda a intenção do turno anterior.
 2. **Pré-busca** (`prefetch.py`): o host chama as tools do assunto via MCP e encadeia valores (o preço do
-   produto encontrado alimenta a simulação de pagamento e o frete). Sem os dados do pedido, o modelo recebe
-   a orientação de pedi-los. Os resultados entram como uma chamada de tools já respondida, numa versão
+   produto encontrado alimenta a simulação de pagamento e o frete). Se a pergunta for só sobre um pedido e
+   faltarem dados, a resposta é um texto pronto, sem LLM, pedindo só o que falta (número do pedido ou
+   e-mail/telefone): com a orientação no prompt, o Bonsai a repetia para o cliente em vez de pedir os dados. Os resultados entram como uma chamada de tools já respondida, numa versão
    enxuta: os textos prontos (`resposta`, `resumo_preco`), a promoção explícita ("nenhuma; o desconto do
    PIX é forma de pagamento") e as orientações.
 3. **Orçamento de contexto** (`budget.py`): ver [Orçamento de contexto](#orçamento-de-contexto).
@@ -586,6 +605,36 @@ sequenceDiagram
 - o rastro de cada turno (assunto, pré-busca, tools oferecidas, tokens estimados, tools chamadas com
   e-mail/telefone mascarados, latência) aparece com `--debug`.
 
+**Conversa e histórico** (`chat.py`, `history.py`): `ChatSession` junta o agente, o histórico e a
+transcrição sem depender da interface. A CLI `emporio chat` usa essa classe, e a API REST e a interface web
+(planejadas) vão usar a mesma.
+
+```mermaid
+erDiagram
+    sessions ||--o{ messages : tem
+    sessions {
+        text id PK "8 hex"
+        text profile "perfil de LLM"
+        text created_at
+        text updated_at
+    }
+    messages {
+        int id PK
+        text session_id FK
+        text role "user | assistant"
+        text content "e-mail e telefone mascarados"
+        text meta "assunto, tools, chamadas, latência, fallback"
+    }
+```
+
+- **Retomar** (`--session`): voltam as últimas `HISTORY_WINDOW` mensagens (padrão 20, sempre começando por
+  uma do cliente) e o assunto da última pergunta. O orçamento de contexto ainda corta o que não couber.
+- **Privacidade:** e-mail e telefone nunca são gravados (`[e-mail]`, `[telefone]`); número de pedido e
+  preços ficam. Ao retomar uma sessão, o cliente informa o contato de novo para ver um pedido, como num
+  atendimento novo.
+- **Transcrição** (`--transcript f.md`): cada turno com as tools usadas (pré-busca ou chamadas pelo
+  modelo), chamadas ao LLM e latência. As conversas de exemplo do projeto vão sair daqui.
+
 **Resultado com o Bonsai real em CPU** (mesma máquina, i5-8265U):
 
 | Pergunta | Antes (commit 11: 8 tools no prompt) | Agora (detecção de assunto + pré-busca) |
@@ -593,6 +642,7 @@ sequenceDiagram
 | "Quanto custa o Takamine GD20?" | 2 chamadas, ~2 mil tokens, **~219 s**, chamou o preço do PIX de "promocional" | 1 chamada, 854 tokens, **~65 s**, preço e PIX certos, "não há promoção" |
 | "quanto custa o GD20 e dá pra fazer em 10x?" | — | 1 chamada, ~970 tokens (estimativa), ~105 s, 10x de R$ 219,90 e PIX certos |
 | "posso devolver?" | — | 1 chamada, 1.575 tokens, ~150 s, regra dos 7 dias, reembolso em 10 dias úteis, frete por conta da loja |
+| "cadê meu pedido?" → "é o 8, telefone …" (`emporio chat`) | — | 1º turno sem LLM (0 s) pedindo os dados; 2º com `consultar_pedido` pré-buscado, 1 chamada, ~105 s: status, itens, rastreio e o atraso com retorno em 24 h úteis |
 
 O que sobra de latência é o processamento do prompt em CPU (~17–20 tokens/s neste notebook). Também ajudou
 usar só os núcleos físicos: 4 threads processam o prompt 35% mais rápido que as 8 do modo automático
@@ -784,7 +834,7 @@ flowchart TD
     end
     subgraph F4["④ Agente"]
         direction LR
-        C10["10 · perfis<br/>de LLM"]:::done --> C11["11 · agente<br/>host MCP"]:::done --> C12["12 · detecção<br/>de assunto"]:::done --> C13["13 · chat +<br/>histórico"]:::next --> C14["14 · guardrails"]
+        C10["10 · perfis<br/>de LLM"]:::done --> C11["11 · agente<br/>host MCP"]:::done --> C12["12 · detecção<br/>de assunto"]:::done --> C13["13 · chat +<br/>histórico"]:::done --> C14["14 · guardrails"]:::next
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR

@@ -147,7 +147,7 @@ async def test_tool_error_is_returned_to_the_model(server):
 async def test_pii_masked_in_trace(server):
     args = '{"numero_pedido": "8", "email_ou_telefone": "(67) 99654-7821"}'
     llm = ScriptedLLM([tool("consultar_pedido", args), answer("Seu pedido está atrasado.")])
-    (turn,), _ = await run(server, llm, "cadê meu pedido?")
+    (turn,), _ = await run(server, llm, "cadê meu pedido?", routing=False)
     assert turn.tools[0].arguments["email_ou_telefone"] == "***"
     assert turn.tools[0].ok  # mas a tool recebeu o valor real
 
@@ -227,17 +227,35 @@ async def test_product_price_feeds_the_payment_simulation(server):
     assert turn.answer.startswith("Dá sim")  # 219,90 está nos dados: passa na checagem
 
 
-async def test_order_without_data_asks_for_it_then_prefetches_on_followup(server):
-    llm = ScriptedLLM([answer("Me passa o número do pedido e o e-mail?"),
-                       answer("Seu pedido está atrasado.")])  # fmt: skip
+async def test_order_without_data_is_asked_without_calling_the_llm(server):
+    """O Bonsai repetia a orientação interna ao cliente; pedir os dados é resposta pronta."""
+    llm = ScriptedLLM([answer("Seu pedido está atrasado.")])
     turns, _ = await run(server, llm, "cadê meu pedido?", "é o 8, telefone (67) 99654-7821")
+    assert turns[0].llm_calls == 0
     assert turns[0].prefetched == []
-    assert "número do pedido" in llm.seen[0][0]["content"]
+    assert "número do pedido" in turns[0].answer
+    assert "e-mail ou telefone" in turns[0].answer
     assert turns[1].route is not None
     assert turns[1].route.inherited
     assert [t.name for t in turns[1].prefetched] == ["consultar_pedido"]
     assert turns[1].prefetched[0].arguments["email_ou_telefone"] == "***"
-    assert tool_results(llm.seen[1])["consultar_pedido"]["verificado"] is True
+    assert tool_results(llm.seen[0])["consultar_pedido"]["verificado"] is True
+    assert turns[1].llm_calls == 1
+
+
+def test_order_data_asked_piece_by_piece():
+    from emporio.agent.prefetch import ask_order_data
+
+    assert "pedido 8" in ask_order_data("8", None)
+    assert "e-mail ou o telefone" in ask_order_data("8", None)
+    assert "número do pedido" in ask_order_data(None, "a@b.com")
+
+
+async def test_order_plus_other_subject_still_goes_to_the_model(server):
+    llm = ScriptedLLM([answer("Me passa o pedido? E o frete é grátis acima de R$ 500.")])
+    (turn,), _ = await run(server, llm, "meu pedido não chegou, qual o prazo de entrega?")
+    assert turn.llm_calls == 1
+    assert "número do pedido" in llm.seen[0][0]["content"]  # orientação no system
 
 
 async def test_accessory_is_redirected_without_tools(server):

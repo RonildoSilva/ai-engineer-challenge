@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     # embeddinggemma: resposta certa ≥ 0,313; fora de escopo ≤ 0,292 (docs/embeddings_eval.md)
     retrieval_min_similarity: float = Field(default=0.30, ge=0.0, le=1.0)
 
+    # --- histórico de conversas --------------------------------------------------------
+    # mensagens retomadas ao continuar uma sessão (o orçamento de contexto ainda corta o excesso)
+    history_window: int = Field(default=20, ge=0)
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _upper(cls, v: object) -> object:
@@ -96,6 +100,10 @@ class Settings(BaseSettings):
     @property
     def store_db(self) -> Path:
         return self.processed_dir / "store.db"
+
+    @property
+    def history_db(self) -> Path:
+        return self.processed_dir / "history.db"
 
     @property
     def pipeline_state_file(self) -> Path:

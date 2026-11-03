@@ -33,6 +33,23 @@ ASK_ORDER_DATA_RETURN = (
     "`consultar_politica` (por exemplo, o prazo de arrependimento). Se o cliente quiser avaliar "
     "uma compra específica, peça o número do pedido e o e-mail ou telefone cadastrado."
 )
+
+
+def ask_order_data(order_id: str | None, contact: str | None) -> str:
+    """Pede o que falta para consultar o pedido (verificação do titular, LGPD)."""
+    if order_id:
+        return (
+            f"Certo, pedido {order_id}! Para confirmar que é você, me informa o e-mail ou o "
+            "telefone usado na compra?"
+        )
+    if contact:
+        return "Obrigada! Agora me passa o número do pedido, por favor?"
+    return (
+        "Claro, vou verificar pra você! Me passa o número do pedido e o e-mail ou telefone "
+        "usado na compra? 😊"
+    )
+
+
 USE_DATA = (
     "Os dados abaixo já foram consultados nas ferramentas da loja para esta mensagem. Responda "
     "com base neles, usando os preços e textos exatamente como vieram (campos `resposta` e "
@@ -72,6 +89,9 @@ class Prefetch:
     calls: list[PrefetchCall] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # orientações para este turno
     unresolved: set[Intent] = field(default_factory=set)  # intenções sem dados suficientes
+    # resposta pronta, sem LLM: só falta o cliente informar dados (o modelo pequeno repetia a
+    # orientação interna para o cliente em vez de pedir os dados)
+    direct_answer: str | None = None
 
     def messages(self) -> list[dict[str, Any]]:
         """Mensagens de chat no formato de uma chamada de tools já respondida."""
@@ -169,6 +189,8 @@ class _Planner:
                 await self.call("consultar_pedido", identity)
             else:
                 self.pf.notes.append(ASK_ORDER_DATA)
+                if r.intents == (Intent.PEDIDO,):
+                    self.pf.direct_answer = ask_order_data(s.order_id, s.contact)
         if r.has(Intent.DEVOLUCAO):
             if s.has_order_identity:
                 await self.call("verificar_devolucao", {**identity, "motivo": self.text})

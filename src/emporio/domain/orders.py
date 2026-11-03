@@ -170,8 +170,8 @@ class OrderService:
                 verified=True,
                 reason=kind,
                 message=f"O pedido ainda não foi entregue ({label}). O prazo de devolução por "
-                "arrependimento só começa a contar no recebimento. Se o cliente quiser cancelar "
-                "antes da entrega, encaminhe para a equipe (o manual não trata cancelamento).",
+                "arrependimento só começa a contar no recebimento. Para cancelar antes da "
+                "entrega, a equipe da loja avalia o caso e retorna em até 24 horas úteis.",
             )
         return {
             "arrependimento": self._regret,
@@ -317,7 +317,7 @@ class OrderService:
         if delayed:
             next_step = (
                 f"A previsão de entrega ({order.estimated_delivery:%d/%m/%Y}) já passou: "
-                "registre o caso e encaminhe para a equipe verificar com a transportadora "
-                "(retorno em até 24 horas úteis)."
+                "vamos registrar o caso e a equipe vai verificar com a transportadora, com "
+                "retorno em até 24 horas úteis."
             )
         return OrderView(order, first_name, STATUS_LABEL[order.status], payment, delayed, next_step)
