@@ -17,6 +17,7 @@ fora.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -71,6 +72,18 @@ POLICY_TOPIC = {
     Intent.PAGAMENTO: "pagamento parcelamento",
     Intent.FRETE: "frete entrega",
 }
+COMPLAINT_REPLY = (
+    "Sinto muito por isso! 😔 Registrei sua mensagem e encaminhei para a equipe da Empório da "
+    "Música, que retorna em até 24 horas úteis. Se preferir, fale também pelo WhatsApp "
+    "(67) 3321-4500. Se for sobre um pedido, me passa o número do pedido e o e-mail ou telefone "
+    "da compra que eu já deixo anotado."
+)
+COMPLAINT = (
+    "O cliente está insatisfeito ou pediu para falar com uma pessoa. Acolha com empatia, sem "
+    "discutir nem se justificar, diga que o caso foi registrado e encaminhado à equipe, que "
+    "retorna em até 24 horas úteis, e informe o WhatsApp (67) 3321-4500. Se ele citar um pedido "
+    "sem os dados, peça o número do pedido e o e-mail ou telefone da compra."
+)
 NO_TOOL_ANSWER = (
     "A loja não vende acessórios; responda com a orientação recebida, sem chamar ferramentas."
 )
@@ -138,6 +151,11 @@ class _Planner:
         self.pf = Prefetch()
         self.price: tuple[float, bool] | None = None  # (valor, em promoção) do produto achado
         self.policy_topics: list[Intent] = [Intent.POLITICA] if route.has(Intent.POLITICA) else []
+        if route.has(Intent.RECLAMACAO):
+            self.pf.notes.append(COMPLAINT)
+            if route.intents == (Intent.RECLAMACAO,):
+                # o Bonsai devolveu a orientação palavra por palavra: aqui a resposta é pronta
+                self.pf.direct_answer = COMPLAINT_REPLY
 
     async def call(self, name: str, args: dict[str, Any]) -> ToolResult:
         r = await self.toolbox.call(name, args)
@@ -254,14 +272,39 @@ def _condense(name: str, r: ToolResult, budget: ContextBudget) -> str:
                 "produtos": [_product(x) for x in d.get("produtos", [])],
             }
         case "consultar_politica":
-            sections = budget.pick_sections(d.get("secoes", []))
-            out = {"secoes": [{"titulo": s["titulo"], "conteudo": s["conteudo"]} for s in sections]}
+            # seções "guideline" são instruções ao atendente, não informação para o cliente: o
+            # Bonsai as recitava. A conduta vai nas orientações do turno.
+            policy = [s for s in d.get("secoes", []) if s.get("tipo") != "guideline"]
+            sections = budget.pick_sections(policy)
+            out = {
+                "secoes": [
+                    {"titulo": s["titulo"], "conteudo": _without_curation_notes(s["conteudo"])}
+                    for s in sections
+                ]
+            }
         case _:
             out = dict(d)
     if o := d.get("orientacao"):
         out["orientacao"] = o
     return json.dumps({k: v for k, v in out.items() if v not in (None, [], {})},
                       ensure_ascii=False, separators=(",", ":"))  # fmt: skip
+
+
+def _without_curation_notes(body: str) -> str:
+    """Tira as notas de curadoria (decisões de manutenção, não texto para o cliente).
+
+    Uma nota é um bloco de citação que começa com "> **Nota de curadoria:**".
+    """
+    out: list[str] = []
+    in_note = False
+    for line in body.splitlines():
+        if line.startswith("> **Nota de curadoria"):
+            in_note = True
+        elif in_note and not line.startswith(">"):
+            in_note = False
+        if not in_note:
+            out.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
 
 
 def _product(p: dict[str, Any], *, full: bool = False) -> dict[str, Any]:

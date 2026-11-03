@@ -267,7 +267,7 @@ async def test_accessory_is_redirected_without_tools(server):
 
 async def test_unknown_subject_offers_only_generic_tools(server):
     llm = ScriptedLLM([answer("Só posso ajudar com a loja.")])
-    (turn,), _ = await run(server, llm, "qual a receita de bolo de cenoura?")
+    (turn,), _ = await run(server, llm, "vocês têm estacionamento?")
     assert turn.prefetched == []
     assert set(turn.tools_offered) == {"buscar_produtos", "detalhar_produto",
                                        "consultar_politica"}  # fmt: skip

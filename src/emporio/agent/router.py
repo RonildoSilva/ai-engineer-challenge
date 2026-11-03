@@ -30,7 +30,8 @@ class Intent(StrEnum):
     PAGAMENTO = "pagamento"  # PIX, cartão, boleto, parcelas
     FRETE = "frete"  # entrega, prazo, frete grátis
     HORARIO = "horario"  # aberto agora? horário, feriados
-    POLITICA = "politica"  # contato, endereço, garantia, privacidade, promoções, reclamação
+    POLITICA = "politica"  # contato, endereço, garantia, privacidade, promoções
+    RECLAMACAO = "reclamacao"  # insatisfação ou pedido de atendimento humano: vai para a equipe
     SAUDACAO = "saudacao"  # só cumprimento ou agradecimento
     GERAL = "geral"  # nada reconhecido: o modelo decide com as tools genéricas
 
@@ -68,8 +69,13 @@ KEYWORDS: dict[Intent, tuple[str, ...]] = {
         "endereco", "onde fica", "localizacao", "como chegar", "telefone", "whatsapp",
         "contato", "email da loja", "instagram", "site", "garantia", "garantias", "conserto",
         "assistencia", "privacidade", "dados pessoais", "meus dados", "lgpd", "promocao",
-        "promocoes", "desconto", "descontos", "oferta", "ofertas", "reclamacao", "reclamar",
-        "atendente", "humano", "falar com alguem", "gerente", "politica", "politicas",
+        "promocoes", "desconto", "descontos", "oferta", "ofertas", "politica", "politicas",
+    ),
+    Intent.RECLAMACAO: (
+        "reclamacao", "reclamar", "reclamando", "reclamei", "pessimo", "pessima", "absurdo",
+        "insatisfeito", "insatisfeita", "descaso", "procon", "decepcionado", "decepcionada",
+        "horrivel", "vergonha", "desrespeito", "nunca mais compro", "palhacada",
+        "atendente", "humano", "falar com alguem", "falar com uma pessoa", "gerente",
     ),
 }  # fmt: skip
 
@@ -96,6 +102,7 @@ TOOLS: dict[Intent, tuple[str, ...]] = {
     Intent.FRETE: ("calcular_frete", "consultar_politica"),
     Intent.HORARIO: ("status_loja",),
     Intent.POLITICA: ("consultar_politica",),
+    Intent.RECLAMACAO: ("consultar_politica",),
     Intent.SAUDACAO: (),
     Intent.GERAL: ("buscar_produtos", "detalhar_produto", "consultar_politica"),
 }
@@ -203,7 +210,7 @@ def detect_intents(text: str) -> tuple[Intent, ...]:
     t = normalize(text)
     found: list[Intent] = []
     for intent in (Intent.PEDIDO, Intent.DEVOLUCAO, Intent.PAGAMENTO, Intent.FRETE,
-                   Intent.HORARIO, Intent.POLITICA):  # fmt: skip
+                   Intent.HORARIO, Intent.POLITICA, Intent.RECLAMACAO):  # fmt: skip
         terms = KEYWORDS[intent]
         if intent is Intent.POLITICA and extract_slots(text).contact:
             terms = tuple(k for k in terms if k not in _CONTACT_WORDS)  # "meu telefone é …"
@@ -221,7 +228,7 @@ def detect_intents(text: str) -> tuple[Intent, ...]:
 
 _CONTACT_WORDS = frozenset({"telefone", "whatsapp", "contato", "email da loja"})
 # assuntos em que citar a categoria não é pedir opções ("meu violão veio com defeito")
-_SERVICE = frozenset({Intent.PEDIDO, Intent.DEVOLUCAO, Intent.FRETE})
+_SERVICE = frozenset({Intent.PEDIDO, Intent.DEVOLUCAO, Intent.FRETE, Intent.RECLAMACAO})
 
 
 def _product_intents(text: str, t: str, *, service: bool) -> list[Intent]:

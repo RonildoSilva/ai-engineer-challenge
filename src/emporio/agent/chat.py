@@ -31,6 +31,9 @@ def turn_meta(turn: Turn) -> dict[str, Any]:
         "prompt_tokens": turn.prompt_tokens,
         "latency_s": round(turn.latency_s, 2),
         "fallback": turn.fallback,
+        "guardrail": turn.guardrail,
+        "escalated": turn.escalated,
+        "redacted": len(turn.redacted),
     }
 
 

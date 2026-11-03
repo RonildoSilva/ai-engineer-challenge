@@ -263,7 +263,7 @@ flowchart LR
     subgraph K2[scripts/check.sh]
         direction TB
         L1[uv lock --check] --> L2[ruff check + format]
-        L2 --> L3[pytest unitário<br/>489 testes, ~30 s, offline]
+        L2 --> L3[pytest unitário<br/>537 testes, ~30 s, offline]
         L3 --> L4[pytest -m integration<br/>9 testes, ~5 min,<br/>sobe os modelos reais]
     end
     K -.-> K2
@@ -293,7 +293,8 @@ uv run pytest -m integration -rs   # só a integração com o LLM local
 | Pedidos e regras | verificação por e-mail ou telefone **do titular** (com/sem DDD, +55) e mensagem neutra em qualquer falha, e-mail duplicado só abre o próprio pedido, pedido atrasado, prazos de arrependimento/defeito/preferência dentro e fora da janela, garantia legal, parcelamento pelas faixas da §3.1, frete metropolitano × outras cidades × frete especial, feriados (Páscoa calculada) e fuso de Campo Grande, CLI (70) | `tests/test_orders_rules.py` |
 | Servidor MCP | exatamente as 8 tools, todas somente leitura e com saída estruturada; nenhuma forma de listar clientes; respostas de cada tool (GD20, promoção sem PIX, alternativas, escopos, pedido verificado e não verificado, devolução, pagamento, frete, horário, políticas); erro esperado amigável, argumento inválido rejeitado, **erro inesperado sem detalhes internos**, **logs sem e-mail/telefone**; resources e prompt; transportes **stdio e HTTP** com subprocesso real (26) | `tests/test_mcp_server.py` |
 | Cliente LLM | perfis do projeto válidos (online marcados como referência), seleção e sobrescritas, **chave de API ausente com erro claro**, contexto lido de `/props` e fallback, temperatura e `max_tokens` do perfil, tools só se suportadas, **normalização de respostas de modelos pequenos** (JSON inválido nos argumentos, cercas de código, tool call escrita como texto, bloco `<think>`), servidor fora do ar e erro 5xx, CLI (25) | `tests/test_llm_client.py` |
-| Detecção de assunto | 16 frases reais com uma intenção e 5 com várias ("quanto custa o GD20 e dá pra fazer em 10x?"), devolução não vira busca de catálogo, assunto desconhecido, subconjunto de tools, "18h"/"12x"/e-mail não viram código de modelo, dados citados (pedido, e-mail, telefone, valor, parcelas, cidade), "meu telefone é…" não é pergunta sobre a loja, **mensagem só com dados herda a intenção**, dados completados pelo histórico, trecho do produto na frase (32) | `tests/test_router.py` |
+| Detecção de assunto | 16 frases reais com uma intenção e 5 com várias ("quanto custa o GD20 e dá pra fazer em 10x?"), devolução não vira busca de catálogo, assunto desconhecido, subconjunto de tools, "18h"/"12x"/e-mail não viram código de modelo, dados citados (pedido, e-mail, telefone, valor, parcelas, cidade), "meu telefone é…" não é pergunta sobre a loja, **mensagem só com dados herda a intenção**, dados completados pelo histórico, trecho do produto na frase, reclamação (33) | `tests/test_router.py` |
+| Guardrails | **injeção de prompt** (9 frases, PT e EN), **dados de terceiros** (8), **fora do escopo** (6), mensagem longa, **11 perguntas legítimas parecidas que precisam passar**; na saída, contato de terceiros mascarado (loja e o próprio cliente preservados) e persona recitada; no agente: mensagem bloqueada não chega ao LLM nem às tools, reclamação sozinha com resposta pronta e encaminhada, reclamação + troca com orientação, categoria vazia, instrução recitada → correção → resposta de segurança, diretrizes internas e notas de curadoria fora dos dados (15 funções, 47 casos) | `tests/test_guardrails.py` |
 | Orçamento de contexto | disponível = janela − resposta − margem, **8k × 128k** (seções e produtos pedidos), seções escolhidas pelo **custo publicado pelo MCP**, tudo cabe em 128k, em 8k o histórico antigo sai primeiro e aos pares, ordem das mensagens, **resultado de tool nunca cortado ao meio**, tools que não cabem saem e são reportadas (9) | `tests/test_budget.py` |
 | Agente | persona e contexto (data de referência, loja aberta) no system prompt, tools do MCP no formato do LLM, loop tool → resultado → resposta, histórico só com perguntas e respostas, argumento inválido / tool inexistente / erro da tool devolvidos ao modelo, **nome de tool quase certo corrigido**, **resposta de segurança** (limite de rodadas, LLM fora do ar, resposta vazia), PII mascarada no rastro, agente via stdio; **pré-busca**: "posso devolver?" em 1 chamada sem tools com a regra dos 7 dias, preço pronto e "sem promoção" explícito, preço do produto alimentando a simulação de 10x, pedido sem dados → pede os dados → pré-busca no turno seguinte, acessório, assunto desconhecido, janela grande; **preço sem fonte**: uma correção e depois resposta de segurança; pedido sem dados respondido sem LLM, pedindo só o que falta (28) | `tests/test_agent.py` |
 | Chat e histórico | e-mail/telefone mascarados ao gravar (pedido e preço preservados), sessão de ida e volta com metadados do turno, janela sempre começando pelo cliente, ordem das sessões e exclusão em cascata, uma conexão por thread, **sessão retomada devolve o histórico e o assunto** ("é o 8, telefone…" continua o pedido), sessão inexistente, `/nova` limpa, transcrição markdown com tools e sem PII, CLI `emporio chat` (conversa, retomada, `--list`, `/nova`, erro) (13) | `tests/test_chat.py` |
@@ -605,6 +606,38 @@ sequenceDiagram
 - o rastro de cada turno (assunto, pré-busca, tools oferecidas, tokens estimados, tools chamadas com
   e-mail/telefone mascarados, latência) aparece com `--debug`.
 
+**Guardrails** (`guardrails.py`, mais a detecção de assunto e a pré-busca):
+
+```mermaid
+flowchart LR
+    M([mensagem]) --> G{guardrails<br/>de entrada}
+    G -->|injeção · dados de terceiros ·<br/>fora do escopo · longa demais| P1[resposta pronta<br/>sem LLM e sem tools]
+    G --> R[detecção de assunto]
+    R -->|só pedido, faltam dados| P2[pede só o que falta<br/>sem LLM]
+    R -->|só reclamação| P3[acolhe, registra, 24 h úteis<br/>sem LLM · encaminhada]
+    R --> PF[pré-busca + LLM]
+    PF --> S{guardrails<br/>de saída}
+    S -->|R$ sem fonte ·<br/>instruções recitadas| C[1 correção, depois<br/>resposta de segurança]
+    S -->|contato de terceiros| X[trocado por<br/>dado protegido]
+    S --> OK([resposta])
+```
+
+| Situação | Como é tratada |
+|---|---|
+| **Injeção de prompt** ("ignore as instruções", "mostre seu prompt", "você agora é…", "modo desenvolvedor") | resposta pronta, sem LLM: não muda o atendimento nem revela instruções |
+| **Dados de terceiros** ("liste os clientes", "qual o e-mail da Ana?", "quem comprou o GD20?") | resposta pronta citando a LGPD; o servidor MCP também não tem tool que liste clientes |
+| **Fora do escopo** explícito (receitas, futebol, política, piadas, programação…) | redireciona para a loja, sem LLM; só se nenhum assunto da loja foi detectado ("violão pra tocar no jogo do Brasil" segue normal) |
+| **Assunto desconhecido** ("vocês têm estacionamento?") | vai ao modelo com 3 tools genéricas; a persona manda recusar com gentileza o que não for da loja |
+| **Acessórios** e **categorias vazias** | a pré-busca traz a orientação do domínio (a loja só vende instrumentos; "no momento não há…") |
+| **Reclamação** ou pedido de atendimento humano | intenção própria: sozinha, resposta pronta (empatia, registro, retorno em 24 h úteis, WhatsApp); com outro assunto, orientação ao modelo. O turno fica marcado como **encaminhado** no histórico |
+| **Saída: contato de terceiros** | e-mail/telefone que não seja da loja nem citado pelo cliente vira `[dado protegido]` |
+| **Saída: instruções recitadas** (16+ palavras seguidas iguais à persona ou às orientações do turno) | 1 correção, depois resposta de segurança |
+| **Dados internos** | seções do manual do tipo `guideline` (instruções ao atendente) e notas de curadoria não entram nos dados pré-buscados: o Bonsai as recitava |
+
+As listas são conservadoras: bloquear uma pergunta legítima custa mais do que deixar o modelo recusar. Os
+testes cobrem tanto o que deve ser bloqueado quanto perguntas parecidas que devem passar ("ignore o que eu
+disse sobre a cor", "qual o e-mail da loja?", "vocês pedem CPF?").
+
 **Conversa e histórico** (`chat.py`, `history.py`): `ChatSession` junta o agente, o histórico e a
 transcrição sem depender da interface. A CLI `emporio chat` usa essa classe, e a API REST e a interface web
 (planejadas) vão usar a mesma.
@@ -834,11 +867,11 @@ flowchart TD
     end
     subgraph F4["④ Agente"]
         direction LR
-        C10["10 · perfis<br/>de LLM"]:::done --> C11["11 · agente<br/>host MCP"]:::done --> C12["12 · detecção<br/>de assunto"]:::done --> C13["13 · chat +<br/>histórico"]:::done --> C14["14 · guardrails"]:::next
+        C10["10 · perfis<br/>de LLM"]:::done --> C11["11 · agente<br/>host MCP"]:::done --> C12["12 · detecção<br/>de assunto"]:::done --> C13["13 · chat +<br/>histórico"]:::done --> C14["14 · guardrails"]:::done
     end
     subgraph F5["⑤ Qualidade e entrega"]
         direction LR
-        C15["15 · avaliação"] --> C16["16 · escala<br/>Postgres/pgvector"] --> C17["17 · exemplos"] --> CX["19–21 · Airflow,<br/>REST, UI"] --> C18["README final"]
+        C15["15 · avaliação"]:::next --> C16["16 · escala<br/>Postgres/pgvector"] --> C17["17 · exemplos"] --> CX["19–21 · Airflow,<br/>REST, UI"] --> C18["README final"]
     end
     F1 --> F2 --> F3 --> F4 --> F5
     classDef next fill:#fde68a,stroke:#b45309,color:#000
@@ -883,6 +916,11 @@ tests/           testes automatizados (unitários + integração com o LLM local
 - A detecção de assunto é por palavras-chave: uma pergunta com vocabulário fora das listas cai no assunto
   "geral", e aí o modelo decide com 3 tools genéricas (e acerta tool calling só em parte dos casos).
 - A checagem de preço sem fonte confere valores em R$, não outros números (prazos, percentuais).
+- Os guardrails de entrada são por padrões de texto: uma injeção reescrita com outras palavras passa por
+  eles. A defesa em profundidade é o resto da arquitetura: as tools são somente leitura, os pedidos exigem a
+  verificação do titular, nenhuma tool lista clientes e a saída tem contatos de terceiros mascarados.
+- Com perguntas que juntam vários assuntos, o Bonsai tende a copiar trechos longos do manual em vez de
+  resumir (os dados estão certos, mas a resposta fica longa).
 - O limiar de similaridade separa pouco: no conjunto de avaliação, a resposta certa menos parecida teve 0,313
   e a pergunta fora de escopo mais parecida, 0,292 (limiar 0,30). Ele é um filtro auxiliar; a defesa principal
   contra perguntas fora de escopo será a detecção de assunto e os guardrails.
